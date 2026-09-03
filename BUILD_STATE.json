@@ -1,0 +1,146 @@
+{
+  "project": "codex",
+  "repo": "https://github.com/vjumbo264/codex",
+  "build_complete": false,
+  "current_task": "task-02",
+  "last_updated_utc": "2026-09-03",
+  "session_history": [
+    {
+      "session": 1,
+      "date_utc": "2026-09-03",
+      "summary": "Initialized repository vjumbo264/codex (public) via GitHub API. Seeded BUILD_STATE.json with full task list. Repo URL: https://github.com/vjumbo264/codex"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-01",
+      "name": "Create public GitHub repository vjumbo264/codex and seed BUILD_STATE.json",
+      "status": "done",
+      "notes": "Repo created via GitHub API (201 Created), public visibility, under vjumbo264. BUILD_STATE.json seeded with full task list, this seed commit pushed to origin/main as the initial commit.",
+      "files": ["BUILD_STATE.json"],
+      "commits": [],
+      "tested": "Repo GET returns 200 after creation; seed push verified on origin/main.",
+      "concerns": "none"
+    },
+    {
+      "id": "task-02",
+      "name": "Design and commit Markdown note-tree schema + ARCHITECTURE.md",
+      "status": "pending",
+      "notes": "Design folder/file layout for topics/subtopics/entries, image storage convention, date-stamping convention. Must: (a) mechanically convert to PDF with no AI, (b) read cleanly as raw Markdown in Telegram, (c) support unlimited nesting. Document in ARCHITECTURE.md.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    },
+    {
+      "id": "task-03",
+      "name": "Scaffold Cloudflare Worker project + create Worker + GitHub auto-deploy connection",
+      "status": "pending",
+      "notes": "Telegram webhook handler skeleton. Create Worker via Cloudflare API using CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID (stored in env, never in files). Connect GitHub repo to Cloudflare for auto-deploy on push (Workers CI / GitHub Actions + wrangler as fallback).",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    },
+    {
+      "id": "task-04",
+      "name": "Implement GitHub-as-database access from the Worker",
+      "status": "pending",
+      "notes": "Read/write/delete repo files via GitHub REST API from Worker. Credential: fine-grained GitHub token stored as Worker secret named GITHUB_REPO_TOKEN (never hardcoded). Note: repo is PUBLIC, so content is world-readable; GITHUB_REPO_TOKEN used only for writes.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": "Repo visibility is public per prompt; notes content will be publicly readable on GitHub. Recorded as an assumption: operator accepted public visibility per the build contract."
+    },
+    {
+      "id": "task-05",
+      "name": "Manual command path end-to-end (zero Gemini): /new /add /delete /topics browsing, in-chat reading (paginated, images inline), PDF export (node+descendants or full notebook)",
+      "status": "pending",
+      "notes": "Fully deterministic. Delete requires inline Yes/Cancel confirmation. PDF render is mechanical Markdown->PDF with inline images, no AI.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    },
+    {
+      "id": "task-06",
+      "name": "Voice note ingestion and image ingestion",
+      "status": "pending",
+      "notes": "Receive Telegram voice/image files via getFile, store images in repo under node assets, associate images with correct entry/node. Voice audio is transcribed (task-07) then discarded — only cleaned text is stored.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    },
+    {
+      "id": "task-07",
+      "name": "Gemini integration for reasoning-required paths only",
+      "status": "pending",
+      "notes": "Voice transcription+cleanup, auto-filing unspecified notes against existing tree, editing notes via natural request, ambiguous-target resolution. Intent-dispatch architecture: Gemini identifies function+target, deterministic function executes. Gemini key added by operator post-build per README (Worker secret GEMINI_API_KEY); build must not block on it — all manual paths must work without it.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    },
+    {
+      "id": "task-08",
+      "name": "Gemini-triggered versions of every manual capability (delete/export/read/browse-equivalent)",
+      "status": "pending",
+      "notes": "Plain-language requests dispatch to the same underlying deterministic functions with minimal-reasoning intent recognition. Gemini never re-reads/re-rewrites/re-processes existing content for these.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    },
+    {
+      "id": "task-09",
+      "name": "Quick-action buttons after auto-filed notes + live status message editing",
+      "status": "pending",
+      "notes": "After auto-file: confirm where note landed with view/move/make-new-topic buttons. Multi-step ops edit one status message (Transcribing… -> Filing… -> Done).",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    },
+    {
+      "id": "task-10",
+      "name": "Register full Telegram slash-command menu",
+      "status": "pending",
+      "notes": "setMyCommands covering every capability.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    },
+    {
+      "id": "task-11",
+      "name": "Set Telegram webhook to deployed Worker URL and verify bot responds live",
+      "status": "pending",
+      "notes": "Use setWebhook with TELEGRAM_BOT_TOKEN (env var, never in files) pointing at the Worker route; verify with getWebhookInfo and a real bot API round-trip.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    },
+    {
+      "id": "task-12",
+      "name": "Write README: phone/browser-friendly Gemini key setup + usage guide",
+      "status": "pending",
+      "notes": "No CLI/desktop assumptions — operator uses Android + Termux + browser dashboards. Steps to add GEMINI_API_KEY Worker secret via Cloudflare dashboard. Usage: capture, browse, read, export, edit, delete — manual and via Gemini.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    },
+    {
+      "id": "task-13",
+      "name": "End-to-end live verification of every required capability; then set build_complete: true",
+      "status": "pending",
+      "notes": "Exercise all required capabilities against the live bot. Spot-check that manual/explicit operations make zero Gemini calls. Only then mark build_complete: true, commit, push.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    }
+  ]
+}
