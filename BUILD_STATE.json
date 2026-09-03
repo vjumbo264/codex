@@ -2,7 +2,7 @@
   "project": "codex",
   "repo": "https://github.com/vjumbo264/codex",
   "build_complete": false,
-  "current_task": "task-02",
+  "current_task": "task-03",
   "last_updated_utc": "2026-09-03",
   "session_history": [
     {
@@ -17,7 +17,9 @@
       "name": "Create public GitHub repository vjumbo264/codex and seed BUILD_STATE.json",
       "status": "done",
       "notes": "Repo created via GitHub API (201 Created), public visibility, under vjumbo264. BUILD_STATE.json seeded with full task list, this seed commit pushed to origin/main as the initial commit.",
-      "files": ["BUILD_STATE.json"],
+      "files": [
+        "BUILD_STATE.json"
+      ],
       "commits": [],
       "tested": "Repo GET returns 200 after creation; seed push verified on origin/main.",
       "concerns": "none"
@@ -25,12 +27,14 @@
     {
       "id": "task-02",
       "name": "Design and commit Markdown note-tree schema + ARCHITECTURE.md",
-      "status": "pending",
-      "notes": "Design folder/file layout for topics/subtopics/entries, image storage convention, date-stamping convention. Must: (a) mechanically convert to PDF with no AI, (b) read cleanly as raw Markdown in Telegram, (c) support unlimited nesting. Document in ARCHITECTURE.md.",
-      "files": [],
+      "status": "done",
+      "notes": "Schema designed and documented in ARCHITECTURE.md: topics=directories under notebook/ (unlimited nesting via filesystem), each node has index.md (# Title + entry blocks of <!-- e:id --> / _UTC date_ / body / ---) and assets/ for images (relative ![alt](assets/file) refs). Entry ids = yyyymmdd-hhmmss-rand4 (sortable, unique, deterministic edit/delete targets). h8 = sha1(path)[:8] node handles for callback_data. Stateless multi-step flows via ForceReply #cx: tokens. No D1/KV - directory structure is single source of truth. PDF render is mechanical (pdf-lib). Gemini strictly limited to 4 reasoning cases; manual path has zero Gemini imports.",
+      "files": [
+        "ARCHITECTURE.md"
+      ],
       "commits": [],
-      "tested": "",
-      "concerns": ""
+      "tested": "ARCHITECTURE.md reviewed against all three hard requirements (mechanical PDF, clean Telegram Markdown, unlimited nesting).",
+      "concerns": "none"
     },
     {
       "id": "task-03",
