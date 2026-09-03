@@ -73,9 +73,11 @@ async function handlePendingFlow(env, message, pending) {
     }
     const text = (message.text || '').trim();
     if (!text) { await sendText(env, chatId, 'Send text or a photo for the note.'); return true; }
-    await appendEntry(env, path, text);
+    const entryId = await appendEntry(env, path, text);
     const node = await readNode(env, path);
-    await sendText(env, chatId, `✅ Added to ${node ? node.title : path}.`);
+    const breadcrumb = path.split('/').join(' › ');
+    const title = node ? node.title : path.split('/').pop();
+    await sendText(env, chatId, `✅ Filed note as entry ${entryId} under ${title} (${breadcrumb}).`);
     return true;
   }
 
@@ -92,7 +94,10 @@ async function handlePendingFlow(env, message, pending) {
     try {
       const made = await createNode(env, '', name);
       await moveEntry(env, fromPath, extra, made.path);
-      await sendText(env, chatId, `✅ Created "${name}" and moved the note there.`);
+      const fromLabel = fromPath ? fromPath.split('/').join(' › ') : '(root)';
+      const toLabel = made.path.split('/').join(' › ');
+      await sendText(env, chatId,
+        `✅ Created new topic "${name}" (${toLabel}) and moved entry ${extra} there from ${fromLabel}.`);
     } catch (e) {
       console.error(e);
       await sendText(env, chatId, '❌ Could not create/move. Try again.');

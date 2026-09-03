@@ -66,7 +66,9 @@ export async function handleCommand(env, message) {
         cur = created.path;
       }
       if (made.length) {
-        await sendText(env, chatId, `✅ Created topic: ${made[made.length - 1].split('/').join(' › ')}`);
+        const p = made[made.length - 1];
+        const leaf = p.split('/').pop();
+        await sendText(env, chatId, `✅ Created new topic "${leaf}" (${p.split('/').join(' › ')}).`);
       } else {
         await sendText(env, chatId, `Topic already exists: ${cur.split('/').join(' › ')}`);
       }

@@ -37,8 +37,10 @@ export async function handlePhotoMessage(env, message, explicitPath) {
     const entryId = await appendEntry(env, nodePath, body);
     const node = await readNode(env, nodePath);
     const { editText } = await import('./telegram.js');
+    const breadcrumb = nodePath.split('/').join(' › ');
+    const title = node ? node.title : nodePath.split('/').pop();
     await editText(env, chatId, status.message_id,
-      `✅ Photo filed under ${node ? node.title : nodePath}.`,
+      `✅ Filed photo as entry ${entryId} under ${title} (${breadcrumb}).`,
       { keyboard: await filedActionsKeyboard(nodePath, entryId) });
   } catch (e) {
     console.error('photo ingest failed', e);
@@ -67,8 +69,10 @@ export async function handleVoiceMessage(env, message, explicitPath = null) {
       await editText(env, chatId, status.message_id, '⏳ Filing…');
       const entryId = await appendEntry(env, explicitPath, cleaned);
       const node = await readNode(env, explicitPath);
+      const breadcrumb = explicitPath.split('/').join(' › ');
+      const title = node ? node.title : explicitPath.split('/').pop();
       await editText(env, chatId, status.message_id,
-        `✅ Voice note filed under ${node ? node.title : explicitPath}.`,
+        `✅ Filed voice note as entry ${entryId} under ${title} (${breadcrumb}).`,
         { keyboard: await filedActionsKeyboard(explicitPath, entryId) });
     } else {
       // No destination -> auto-file the cleaned text via Gemini.

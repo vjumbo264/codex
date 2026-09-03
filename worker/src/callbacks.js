@@ -6,6 +6,7 @@ import { answerCb, sendText, editText } from './telegram.js';
 import { h8 } from './util.js';
 import { resolveH8, getNodes } from './tree.js';
 import { readNode, deleteNodeTree, deleteEntry, moveEntry, createNode } from './notes.js';
+
 import { browseKeyboard, confirmDeleteKeyboard, moveTargetKeyboard } from './keyboards.js';
 import { sendReadPage } from './read.js';
 import { doExport } from './export.js';
@@ -83,12 +84,19 @@ export async function routeCallbackQuery(query, env) {
       try {
         if (entryId) {
           const path = await resolveH8(env, handle);
+          const node = path !== null ? await readNode(env, path) : null;
           await deleteEntry(env, path, entryId);
-          await editText(env, chatId, messageId, '🗑 Entry deleted.');
+          const where = path ? path.split('/').join(' › ') : '(root)';
+          const title = node ? node.title : (path ? path.split('/').pop() : '(unknown)');
+          await editText(env, chatId, messageId,
+            `🗑 Deleted entry ${entryId} from ${title} (${where}).`);
         } else {
           const path = await resolveH8(env, handle, true);
+          const parentPath = path && path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+          const where = path ? path.split('/').join(' › ') : '(root)';
           const n = await deleteNodeTree(env, path);
-          await editText(env, chatId, messageId, `🗑 Deleted "${path.split('/').pop()}" (${n} files).`);
+          await editText(env, chatId, messageId,
+            `🗑 Deleted topic "${path.split('/').pop()}" (${where}) and ${n} file${n === 1 ? '' : 's'} inside it.`);
         }
       } catch (e) {
         console.error(e);
@@ -121,8 +129,10 @@ export async function routeCallbackQuery(query, env) {
       await answerCb(env, query.id, 'Moving…');
       try {
         await moveEntry(env, fromPath, a2, toPath);
+        const fromLabel = fromPath ? fromPath.split('/').join(' › ') : '(root)';
+        const toLabel = toPath ? toPath.split('/').join(' › ') : '(root)';
         await editText(env, chatId, messageId,
-          `✅ Moved to ${toPath.split('/').join(' › ')}.`);
+          `✅ Moved entry ${a2} from ${fromLabel} to ${toLabel}.`);
       } catch (e) {
         console.error(e);
         await editText(env, chatId, messageId, '❌ Move failed.');

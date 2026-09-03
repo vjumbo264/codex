@@ -123,8 +123,13 @@ ${noteText}` }],
   await status('⏳ Filing…');
   const entryId = await appendEntry(env, nodePath, noteText);
   const node = await readNode(env, nodePath);
+  const breadcrumb = nodePath.split('/').join(' › ');
+  const created = !!decision.new;
+  const title = node ? node.title : nodePath.split('/').pop();
   await editText(env, chatId, statusMessageId,
-    `✅ Filed under ${node ? node.title : nodePath} (${nodePath.split('/').join(' › ')}).`,
+    created
+      ? `✅ Created new topic "${title}" (${breadcrumb}) and filed the note there as entry ${entryId}.`
+      : `✅ Filed note as entry ${entryId} under ${title} (${breadcrumb}).`,
     { keyboard: await filedActionsKeyboard(nodePath, entryId) });
   return nodePath;
 }
@@ -143,7 +148,9 @@ export async function routeFreeText(env, message, text, opts = {}) {
     if (path !== null) {
       const entryId = await appendEntry(env, path, m[2].trim());
       const node = await readNode(env, path);
-      await sendText(env, chatId, `✅ Added to ${node ? node.title : path}.`,
+      const breadcrumb = path.split('/').join(' › ');
+      const title = node ? node.title : path.split('/').pop();
+      await sendText(env, chatId, `✅ Filed note as entry ${entryId} under ${title} (${breadcrumb}).`,
         { keyboard: await filedActionsKeyboard(path, entryId) });
       return;
     }
@@ -152,7 +159,9 @@ export async function routeFreeText(env, message, text, opts = {}) {
   if (m) {
     const made = await createNode(env, '', m[1].trim());
     const entryId = await appendEntry(env, made.path, m[2].trim());
-    await sendText(env, chatId, `✅ Created "${m[1].trim()}" and filed the note there.`,
+    const breadcrumb = made.path.split('/').join(' › ');
+    await sendText(env, chatId,
+      `✅ Created new topic "${m[1].trim()}" (${breadcrumb}) and filed the note there as entry ${entryId}.`,
       { keyboard: await filedActionsKeyboard(made.path, entryId) });
     return;
   }
@@ -242,8 +251,9 @@ ${text}` }],
     case 'delete_topic': {
       const path = await resolvePath(env, intent.path || '', true);
       if (path === null) { await editText(env, chatId, statusMessageId, `Topic not found: ${intent.path}`); return; }
+      const breadcrumb = path.split('/').join(' › ');
       await editText(env, chatId, statusMessageId,
-        `⚠️ Delete topic "${path.split('/').pop()}" and everything inside?`,
+        `⚠️ Delete topic "${path.split('/').pop()}" (${breadcrumb}) and everything inside?`,
         { keyboard: confirmDeleteKeyboard(await h8(path), 'topic') });
       return;
     }
@@ -260,7 +270,7 @@ ${text}` }],
       const { browseKeyboard } = await import('./keyboards.js');
       const nodes = await getNodes(env);
       const root = nodes.get('');
-      await editText(env, chatId, statusMessageId, '🗂 Your topics:',
+      await editText(env, chatId, statusMessageId, '🗂 Your topics — pick one to open:',
         { keyboard: await browseKeyboard('', root ? root.children : [], { backTo: null }) });
       return;
     }
@@ -295,8 +305,9 @@ User described: ${intent.entry_hint || ''}` }] }],
   if (!entry) { await editText(env, chatId, statusMessageId, 'Could not identify that entry.'); return; }
 
   if (mode === 'delete') {
+    const breadcrumb = path.split('/').join(' › ');
     await editText(env, chatId, statusMessageId,
-      `⚠️ Delete this entry from ${node.title}?\n\n_${entry.date}_\n${entry.body.slice(0, 200)}`,
+      `⚠️ Delete entry ${entry.id} from ${node.title} (${breadcrumb})?\n\n_${entry.date}_\n${entry.body.slice(0, 200)}`,
       { keyboard: confirmDeleteKeyboard(`${await h8(path)}:${entry.id}`, 'entry') });
     return;
   }
@@ -317,8 +328,9 @@ ${intent.instruction || 'improve clarity'}` }] }],
   const body = String(rewritten).trim();
   if (!body) { await editText(env, chatId, statusMessageId, '❌ Edit produced nothing.'); return; }
   await updateEntry(env, path, entry.id, body);
+  const breadcrumb = path.split('/').join(' › ');
   await editText(env, chatId, statusMessageId,
-    `✏️ Updated the entry in ${node.title}:\n\n_${entry.date}_\n${body.slice(0, 400)}`);
+    `✏️ Updated entry ${entry.id} in ${node.title} (${breadcrumb}):\n\n_${entry.date}_\n${body.slice(0, 400)}`);
 }
 
 // ---- auto-filing a photo (caption + image understanding) ------------------
@@ -360,8 +372,13 @@ Reply with ONLY strict JSON: {"path":"<existing path with > separators>","captio
   const body = `${decision.caption ? decision.caption + '\n\n' : (caption ? caption + '\n\n' : '')}![photo](${stored.rel})`;
   const entryId = await appendEntry(env, nodePath, body);
   const node = await readNode(env, nodePath);
+  const breadcrumb = nodePath.split('/').join(' › ');
+  const title = node ? node.title : nodePath.split('/').pop();
+  const created = !!decision.new;
   await editText(env, chatId, statusMessageId,
-    `✅ Photo filed under ${node ? node.title : nodePath}.`,
+    created
+      ? `✅ Created new topic "${title}" (${breadcrumb}) and filed the photo there as entry ${entryId}.`
+      : `✅ Filed photo as entry ${entryId} under ${title} (${breadcrumb}).`,
     { keyboard: await filedActionsKeyboard(nodePath, entryId) });
 }
 
