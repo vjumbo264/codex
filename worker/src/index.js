@@ -1,6 +1,6 @@
 // Codex — Telegram-first personal notebook.
 // Webhook entry point. Verifies the Telegram secret token header, then
-// routes the update. Manual commands/buttons never touch Gemini.
+// routes the update. Manual commands/buttons never touch Gemini. (redeploy)
 
 import { routeMessage, routeCallbackQuery } from './router.js';
 
