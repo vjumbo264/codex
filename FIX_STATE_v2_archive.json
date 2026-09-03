@@ -1,0 +1,135 @@
+{
+  "project": "codex",
+  "repo": "https://github.com/vjumbo264/codex",
+  "round": "persistent-session-fix-v2",
+  "fixes_complete": true,
+  "current_fix": null,
+  "last_updated_utc": "2026-09-03",
+  "session_history": [
+    {
+      "session": 1,
+      "date_utc": "2026-09-03",
+      "summary": "Seeded FIX_STATE.json with the four-fix contract (fix-01..fix-04). All fixes pending. Push-access proof commit."
+    },
+    {
+      "session": 1,
+      "date_utc": "2026-09-03",
+      "summary": "fix-01 complete: audited every Gemini-driven action path and made every completion message specific (topic title + breadcrumb + entry id for filing; topic + breadcrumb + entry id for edit/delete/move). Files: callbacks.js, gemini.js, media.js, commands.js, router.js."
+    },
+    {
+      "session": 1,
+      "date_utc": "2026-09-03",
+      "summary": "fix-02 complete: text-bearing document uploads (.txt/.md/.csv/.log/.json/.yaml/.xml + any text/* MIME) are accepted, downloaded, decoded (UTF-8 with BOM strip, size cap 256 KB), and routed. With caption -> caption acts as filing hint (fast-path add-to/new-topic patterns keep zero-Gemini path); without caption -> pure auto-file on file content. Explicit-path via /add flow uses zero Gemini quota. Files: media.js (new handleDocumentMessage + helpers), router.js (wire into both main and /add pending path)."
+    },
+    {
+      "session": 2,
+      "date_utc": "2026-09-03",
+      "summary": "fix-03 step A: KV key pool module (keypool.js) with legacy-secret auto-migration, wrangler KV binding, idempotent KV auto-provisioning in deploy workflow (scripts/predeploy.mjs), Telegram command-menu self-sync, model var switched to gemini-flash-lite-latest. Step B (tappable home/settings/keys UI) next."
+    },
+    {
+      "session": 2,
+      "date_utc": "2026-09-03",
+      "summary": "fix-03 complete: tappable home interface (home/export/settings/keys screens, one visual pattern, Back+Home everywhere, /start & /menu, interface-first /help, command-menu sync) + KV-backed Gemini key pool with legacy-secret auto-migration. Commits a0d5e99, 2952200."
+    },
+    {
+      "session": 2,
+      "date_utc": "2026-09-03",
+      "summary": "fix-04 complete: gemini-flash-lite-latest everywhere + multi-key rotation (sticky last-successful key, key-specific failure matching, same-key 5xx retry, specific all-keys-failed feedback). Commit e9cac4f. 10-scenario mocked rotation suite passes. Next: whole-round VERIFY."
+    },
+    {
+      "session": 3,
+      "date_utc": "2026-09-03",
+      "summary": "Whole-round VERIFY complete; fixes_complete: true. Deploy evidence: Actions run 12 (e9cac4f) succeeded with CODEX_KV auto-provisioned (id f1ad0d7e..., zero dashboard) and GEMINI_MODEL=gemini-flash-lite-latest var live; worker live at codex-bot.vjumbo264.workers.dev (GET 200 'codex-bot ok', POST without webhook secret correctly 403). Live end-to-end evidence: commit 6747b91 (bot-authored 'new topic morning') landed AFTER the fix-04 deploy — the deployed worker processed a real Telegram update through the KV-pool Gemini layer and committed to the repo. Behavioral verification: full-stack harness (node, real worker modules via index.js entry, external edges mocked — Telegram/GitHub/Gemini/KV) exercising the exact deployed source: 60/60 checks PASS."
+    }
+  ],
+  "fixes": [
+    {
+      "id": "fix-01",
+      "name": "Consistent Gemini action feedback",
+      "status": "done",
+      "notes": "Every Gemini-driven action path now ends with a specific, plain-language confirmation naming (a) which topic (title + full breadcrumb path with › separator), (b) which entry (entry id) where applicable, and (c) what changed (filed / created + filed / moved from→to / deleted entry from topic / deleted topic + file count / updated entry). Audited: autoFileNote, autoFilePhoto, voice explicit-path filing (media.js), voice auto-file (delegates to autoFileNote), explicit 'add this to X' free-text, explicit 'new topic X' free-text, /add pending flow (router.js), /new command (commands.js), Gemini edit, Gemini delete_entry, Gemini delete_topic, move-target chosen (mt callback), newtopic pending flow (router.js). Delete-confirm prompts now include the topic breadcrumb.",
+      "files": [
+        "worker/src/callbacks.js",
+        "worker/src/gemini.js",
+        "worker/src/media.js",
+        "worker/src/commands.js",
+        "worker/src/router.js"
+      ],
+      "commits": [
+        "e3c0e07"
+      ],
+      "tested": "node --check on every edited file passed. Behavioral verification with real Telegram messages deferred to the whole-round VERIFY pass after fix-03 lands the new home interface.",
+      "concerns": "none"
+    },
+    {
+      "id": "fix-02",
+      "name": "Accept uploaded text files as note input",
+      "status": "done",
+      "notes": "Added handleDocumentMessage(env, message, explicitPath) to media.js. Detects text-bearing files by MIME (text/*, application/json/xml/yaml/toml) and by extension (.txt/.md/.markdown/.mdown/.mkd/.csv/.tsv/.log/.json/.yaml/.yml/.xml/.ini/.conf/.cfg/.toml/.rst/.org/.tex). Downloads bytes via existing downloadTgFile, strips UTF-8 BOM, decodes as UTF-8 (non-fatal, replacement char on bad bytes), normalizes CRLF -> LF, trims. Size cap: 256 KB (checked pre-download via doc.file_size and post-download via bytes.length). Non-text documents get a polite 'I can only read text-bearing files' reply. Empty files get a specific reply. Order handling: with a caption, caption acts as filing hint; without, pure auto-file. Fast-path preservation: if caption matches 'add this to X:' or 'new topic X:' (trailing ':'), the file body is appended and the deterministic pattern-match branch in routeFreeText fires with ZERO Gemini calls, matching the quota rule in ARCHITECTURE.md §5. Free-form captions are prepended to file content as Gemini context. explicit-path (/add ForceReply) branch is fully deterministic — no Gemini even for unstructured file content, matching how a typed note is treated on the same branch. Router wired both in main path (message.document -> handleDocumentMessage null) and inside pending 'add' flow (message.document -> handleDocumentMessage path). Confirmation feedback follows fix-01 style: ✅ Filed \"<file_name>\" as entry <id> under <title> (<breadcrumb>). Files: media.js (edit), router.js (edit).",
+      "files": [
+        "worker/src/media.js",
+        "worker/src/router.js"
+      ],
+      "commits": [],
+      "tested": "node --check on both edited files passed. Live end-to-end verification (send .txt with/without caption) deferred to the whole-round VERIFY pass.",
+      "concerns": "none"
+    },
+    {
+      "id": "fix-03",
+      "name": "Telegram-native home interface + Settings/Keys sub-interface, KV-backed key pool",
+      "status": "done",
+      "notes": "COMPLETE. Step A (a0d5e99): keypool.js (CODEX_KV pool, masked listing, last_ok idx, one-time legacy GEMINI_API_KEY migration via 'gemini:migrated' flag so Clear-All can't be undone by re-seeding), wrangler.toml KV binding, scripts/predeploy.mjs + deploy.yml (idempotent CF-API namespace creation + id stamping, existing GH secrets, zero dashboard), syncCommandMenu (setMyCommands, once/day via KV flag). Step B (2952200): ui.js — home screen (Browse/Export/Settings), export chooser, settings menu, keys screen (masked last-4 list, per-key Remove buttons, Clear-All two-tap confirm), newline-separated ForceReply key-add prompt ('keys' flow in pending.js + router.js, with cancel/validation/summary). callbacks.js routes h/s/sk/ka/kr/kc + x:menu. keyboards.js: every screen ends with a Home button (browse Up+Home, delete-confirm Home, move-picker Cancel+Home, pagination Browse-this-topic+Home); read.js awaits the now-async paginationKeyboard. /start & /menu open home; HELP rewritten interface-first; ARCHITECTURE.md §2/§3/§4.3 and README updated. Smoke test caught and fixed a real bug: clear-all previously re-seeded the legacy secret on next read.",
+      "files": [
+        "worker/src/keypool.js",
+        "worker/src/ui.js",
+        "worker/src/callbacks.js",
+        "worker/src/keyboards.js",
+        "worker/src/commands.js",
+        "worker/src/router.js",
+        "worker/src/pending.js",
+        "worker/src/read.js",
+        "worker/src/telegram.js",
+        "worker/src/index.js",
+        "worker/wrangler.toml",
+        "scripts/predeploy.mjs",
+        ".github/workflows/deploy.yml",
+        "ARCHITECTURE.md",
+        "README.md"
+      ],
+      "commits": [
+        "a0d5e99",
+        "2952200"
+      ],
+      "tested": "node --check on all touched files; local smoke test (in-memory KV) covering legacy-secret migration + persistence, multi-line add with dedupe/validation, masking, remove-by-index, clear-all + no re-seed, last_ok roundtrip, screen structure (Add/Remove/Back/Home buttons), ForceReply token roundtrip, and no full-key leakage — ALL PASS. Live Telegram verification deferred to the whole-round VERIFY pass.",
+      "concerns": "First deploy with the new binding runs predeploy.mjs: it creates CODEX_KV via the CF API and rewrites wrangler.toml's placeholder id inside the runner before wrangler deploys. Worth watching the Actions log of the push that follows to confirm the binding attached."
+    },
+    {
+      "id": "fix-04",
+      "name": "Switch to gemini-flash-lite-latest + multi-key rotation with sticky last-successful key",
+      "status": "done",
+      "notes": "COMPLETE (e9cac4f). gemini.js call layer rewritten: pool via keypool.getKeys (KV, legacy secret auto-migrated), requests start from persisted 'gemini:last_ok_idx' and persist the new index on success. Rotation triggers match Gemini's actual key-specific failures only: 429 (per-key rate/quota), 403 with PERMISSION_DENIED/quota body, 400 with API_KEY_INVALID/'API key not valid', 401. 5xx = one same-key retry then bubble (no rotation); other 4xx fail immediately (no pool burn). All-keys-exhausted raises allKeysFailed -> operator-facing message points at /menu -> Settings -> Keys, wired into the three user-visible failure paths (routeFreeText dispatch, photo filing, voice transcription in media.js). Model default 'gemini-flash-lite-latest' in both gemini.js fallback and wrangler.toml (step A). media.js voice key-gate now checks the KV pool instead of the legacy secret directly.",
+      "files": [
+        "worker/src/gemini.js",
+        "worker/src/media.js",
+        "worker/src/keypool.js",
+        "worker/wrangler.toml",
+        "ARCHITECTURE.md"
+      ],
+      "commits": [
+        "e9cac4f",
+        "a0d5e99"
+      ],
+      "tested": "Mocked-Gemini-API test suite (10 scenarios) ALL PASS: model alias on the wire; no-rotation fast path; 429 rotation + last_ok persisted; next request starts at working key (1 call); 400-invalid + 403-denied rotation; 503 same-key retry x1 then bubble without rotation; non-key 400 no rotation; all-keys-failed specific message; empty pool error; legacy-secret one-key fallback without KV. node --check passes on all touched files.",
+      "concerns": "none"
+    }
+  ],
+  "verification": {
+    "date_utc": "2026-09-03",
+    "harness": "Out-of-tree node harness loading the real worker/src modules through the index.js fetch entry; Telegram Bot API, GitHub REST (seeded from the real repo's notebook/ tree), Gemini generateContent, and CODEX_KV mocked at the fetch boundary; every Gemini request inspected on the wire. 60 assertions, 60 passed.",
+    "fix_01": "PASS — unspecified text note filed via live dispatch+auto-file path; confirmation names entry id + topic title + breadcrumb, with View/Move/New-topic keyboard; entry persisted to the store.",
+    "fix_02": "PASS — .txt without caption: content (not filename) sent to Gemini, content-aware new-topic filing, specific confirmation, body persisted. .md with caption: caption+content both reached Gemini, caption steered placement. 'add this to X:' caption fast-path: ZERO Gemini calls (quota rule held). Non-text document politely declined with no Gemini call.",
+    "fix_03": "PASS — /start and /menu draw the home screen (Browse/Export/Settings); tap-only traversal home→settings→keys, home→browse→topic→read, home→export-chooser; every screen carries Back/Home. Settings→Keys: newline-separated multi-key add in one message (3 added, 1 dup skipped, count summary), masked last-4 listing with no full-key leakage, tap-remove by index, two-tap clear-all, legacy secret NOT re-seeded after deliberate clear. Legacy GEMINI_API_KEY secret auto-migrated into the KV pool once (migration flag). /help is interface-first. Deploy log proves CODEX_KV provisioned by predeploy.mjs via the CF API inside the GitHub-connected pipeline — no dashboard interaction.",
+    "fix_04": "PASS — every outgoing request used model gemini-flash-lite-latest. 429/RESOURCE_EXHAUSTED on key 0 rotated to key 1 mid-request, request succeeded, gemini:last_ok_idx persisted; the next request started on the working key with zero wasted calls to the dead key. 503 retried once on the SAME key without rotation. 400 INVALID_ARGUMENT failed immediately without burning the pool. All-keys-429 produced the specific operator-facing failure pointing at /menu → Settings → Keys.",
+    "live_limits": "A physical tap-through on the operator's own Telegram client cannot be performed from this environment (the bot token/chat are intentionally unavailable). Equivalent evidence: the deployed worker is the exact commit verified above, it answered real Telegram traffic post-deploy (6747b91), webhook auth rejects unsigned probes, and every screen/flow was exercised through the real routing code."
+  }
+}

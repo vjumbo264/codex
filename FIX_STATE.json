@@ -1,10 +1,11 @@
 {
   "project": "codex",
   "repo": "https://github.com/vjumbo264/codex",
-  "round": "persistent-session-fix-v2",
-  "fixes_complete": true,
-  "current_fix": null,
+  "round": "persistent-session-fix-v3",
+  "fixes_complete": false,
+  "current_fix": "fix-01",
   "last_updated_utc": "2026-09-03",
+  "prior_rounds_note": "The v2 round (see FIX_STATE_v2_archive.json and session_history below) ended with fixes_complete: true and 'verified live' claims, but the operator has since observed live failures (added keys invisible at request time; delete-after-add broken) proving the v2 verification was insufficient. v3 exists to root-cause and repair those failures for real, against the actual deployed bot.",
   "session_history": [
     {
       "session": 1,
@@ -39,97 +40,49 @@
     {
       "session": 3,
       "date_utc": "2026-09-03",
-      "summary": "Whole-round VERIFY complete; fixes_complete: true. Deploy evidence: Actions run 12 (e9cac4f) succeeded with CODEX_KV auto-provisioned (id f1ad0d7e..., zero dashboard) and GEMINI_MODEL=gemini-flash-lite-latest var live; worker live at codex-bot.vjumbo264.workers.dev (GET 200 'codex-bot ok', POST without webhook secret correctly 403). Live end-to-end evidence: commit 6747b91 (bot-authored 'new topic morning') landed AFTER the fix-04 deploy — the deployed worker processed a real Telegram update through the KV-pool Gemini layer and committed to the repo. Behavioral verification: full-stack harness (node, real worker modules via index.js entry, external edges mocked — Telegram/GitHub/Gemini/KV) exercising the exact deployed source: 60/60 checks PASS."
+      "summary": "Whole-round VERIFY (v2) complete; fixes_complete: true at the time. Deploy evidence: Actions run 12 (e9cac4f) succeeded with CODEX_KV auto-provisioned (id f1ad0d7e..., zero dashboard) and GEMINI_MODEL=gemini-flash-lite-latest var live; worker live at codex-bot.vjumbo264.workers.dev (GET 200 'codex-bot ok', POST without webhook secret correctly 403). Live end-to-end evidence: commit 6747b91 (bot-authored 'new topic morning') landed AFTER the fix-04 deploy. Behavioral verification: full-stack harness (60/60 checks PASS). NOTE (v3): despite all of the above, the operator later observed on the live bot that keys added via Settings → Keys → Add were invisible at request time ('I need the Gemini API key...' for plain free-text), and delete-after-add misbehaved — so v2's 'verified live' did not reflect actual production behavior for the KV pool. v3 re-opens these areas."
+    },
+    {
+      "session": 4,
+      "date_utc": "2026-09-03",
+      "summary": "v3 round seeded: FIX_STATE.json re-seeded with fix-01..fix-03 (all pending) per the v3 contract; v2 file preserved verbatim as FIX_STATE_v2_archive.json. Push-access proof commit for v3."
     }
   ],
   "fixes": [
     {
       "id": "fix-01",
-      "name": "Consistent Gemini action feedback",
-      "status": "done",
-      "notes": "Every Gemini-driven action path now ends with a specific, plain-language confirmation naming (a) which topic (title + full breadcrumb path with › separator), (b) which entry (entry id) where applicable, and (c) what changed (filed / created + filed / moved from→to / deleted entry from topic / deleted topic + file count / updated entry). Audited: autoFileNote, autoFilePhoto, voice explicit-path filing (media.js), voice auto-file (delegates to autoFileNote), explicit 'add this to X' free-text, explicit 'new topic X' free-text, /add pending flow (router.js), /new command (commands.js), Gemini edit, Gemini delete_entry, Gemini delete_topic, move-target chosen (mt callback), newtopic pending flow (router.js). Delete-confirm prompts now include the topic breadcrumb.",
-      "files": [
-        "worker/src/callbacks.js",
-        "worker/src/gemini.js",
-        "worker/src/media.js",
-        "worker/src/commands.js",
-        "worker/src/router.js"
-      ],
-      "commits": [
-        "e3c0e07"
-      ],
-      "tested": "node --check on every edited file passed. Behavioral verification with real Telegram messages deferred to the whole-round VERIFY pass after fix-03 lands the new home interface.",
-      "concerns": "none"
+      "name": "Root-cause and repair the Gemini key pool actually being empty in production despite keys being 'added' successfully",
+      "status": "in_progress",
+      "notes": "Observed live: after Settings → Keys → Add confirms a key was added, plain free-text requests still reply 'I need the Gemini API key to file free-form notes...'. The pool the dispatch code reads at request time is empty regardless of what the Add flow appeared to do. Investigation checklist (confirm which is actually true in the live environment, in order): (a) is the placeholder KV id 0000... still what the deployed Worker is bound to (check Actions build logs for the latest successful deploy, wrangler.toml at the commit that deploy built from, and whether predeploy.mjs genuinely ran in that pipeline); (b) is predeploy.mjs wired into the actual build command the Workers Build runs, or does it only exist in the repo; (c) did predeploy.mjs run but fail silently; (d) did it create the namespace but the id it stamped never took effect for the deployed build (Workers Builds build from a git checkout — a runner-side file edit cannot persist). Then fix the root cause properly: the end state must be a real working KV namespace permanently bound as CODEX_KV in what the live Worker actually deploys from, self-sufficient across future deploys, no manual dashboard steps ever again. Also make KV binding failures LOUD: getKeys/addKeys/writePool must never silently behave as 'zero keys configured' when the binding is missing/non-functional. VERIFY FOR REAL: add a key through Settings → Keys → Add on the live bot, then send a plain free-text message and confirm it is filed (or at minimum no longer produces the 'I need the Gemini API key' message).",
+      "files": [],
+      "commits": [],
+      "tested": "not yet",
+      "concerns": "none yet"
     },
     {
       "id": "fix-02",
-      "name": "Accept uploaded text files as note input",
-      "status": "done",
-      "notes": "Added handleDocumentMessage(env, message, explicitPath) to media.js. Detects text-bearing files by MIME (text/*, application/json/xml/yaml/toml) and by extension (.txt/.md/.markdown/.mdown/.mkd/.csv/.tsv/.log/.json/.yaml/.yml/.xml/.ini/.conf/.cfg/.toml/.rst/.org/.tex). Downloads bytes via existing downloadTgFile, strips UTF-8 BOM, decodes as UTF-8 (non-fatal, replacement char on bad bytes), normalizes CRLF -> LF, trims. Size cap: 256 KB (checked pre-download via doc.file_size and post-download via bytes.length). Non-text documents get a polite 'I can only read text-bearing files' reply. Empty files get a specific reply. Order handling: with a caption, caption acts as filing hint; without, pure auto-file. Fast-path preservation: if caption matches 'add this to X:' or 'new topic X:' (trailing ':'), the file body is appended and the deterministic pattern-match branch in routeFreeText fires with ZERO Gemini calls, matching the quota rule in ARCHITECTURE.md §5. Free-form captions are prepended to file content as Gemini context. explicit-path (/add ForceReply) branch is fully deterministic — no Gemini even for unstructured file content, matching how a typed note is treated on the same branch. Router wired both in main path (message.document -> handleDocumentMessage null) and inside pending 'add' flow (message.document -> handleDocumentMessage path). Confirmation feedback follows fix-01 style: ✅ Filed \"<file_name>\" as entry <id> under <title> (<breadcrumb>). Files: media.js (edit), router.js (edit).",
-      "files": [
-        "worker/src/media.js",
-        "worker/src/router.js"
-      ],
+      "name": "Deleting a key immediately after adding it (and in general) must work reliably",
+      "status": "pending",
+      "notes": "Operator-reported: removing a key right after adding one doesn't work. RETEST ONLY AFTER fix-01 is confirmed working live (a broken KV binding would itself explain it). If it still reproduces: check index/identity mismatch between what ui.js keysScreen renders and what removeKeyAt removes (stale keyboard after add → index computed against pre-add list → wrong key removed or silent out-of-range no-op); check whether the Keys screen re-renders fresh (new read of the current pool) every time it's shown after add/remove. Make remove-after-add and remove-twice-in-a-row both behave correctly and predictably (second removal should say the key/index no longer exists). VERIFY FOR REAL: add two keys in one message, tap-remove one, confirm screen shows only the remaining key, remove that too, confirm screen shows zero keys configured.",
+      "files": [],
       "commits": [],
-      "tested": "node --check on both edited files passed. Live end-to-end verification (send .txt with/without caption) deferred to the whole-round VERIFY pass.",
-      "concerns": "none"
+      "tested": "not yet",
+      "concerns": "none yet"
     },
     {
       "id": "fix-03",
-      "name": "Telegram-native home interface + Settings/Keys sub-interface, KV-backed key pool",
-      "status": "done",
-      "notes": "COMPLETE. Step A (a0d5e99): keypool.js (CODEX_KV pool, masked listing, last_ok idx, one-time legacy GEMINI_API_KEY migration via 'gemini:migrated' flag so Clear-All can't be undone by re-seeding), wrangler.toml KV binding, scripts/predeploy.mjs + deploy.yml (idempotent CF-API namespace creation + id stamping, existing GH secrets, zero dashboard), syncCommandMenu (setMyCommands, once/day via KV flag). Step B (2952200): ui.js — home screen (Browse/Export/Settings), export chooser, settings menu, keys screen (masked last-4 list, per-key Remove buttons, Clear-All two-tap confirm), newline-separated ForceReply key-add prompt ('keys' flow in pending.js + router.js, with cancel/validation/summary). callbacks.js routes h/s/sk/ka/kr/kc + x:menu. keyboards.js: every screen ends with a Home button (browse Up+Home, delete-confirm Home, move-picker Cancel+Home, pagination Browse-this-topic+Home); read.js awaits the now-async paginationKeyboard. /start & /menu open home; HELP rewritten interface-first; ARCHITECTURE.md §2/§3/§4.3 and README updated. Smoke test caught and fixed a real bug: clear-all previously re-seeded the legacy secret on next read.",
-      "files": [
-        "worker/src/keypool.js",
-        "worker/src/ui.js",
-        "worker/src/callbacks.js",
-        "worker/src/keyboards.js",
-        "worker/src/commands.js",
-        "worker/src/router.js",
-        "worker/src/pending.js",
-        "worker/src/read.js",
-        "worker/src/telegram.js",
-        "worker/src/index.js",
-        "worker/wrangler.toml",
-        "scripts/predeploy.mjs",
-        ".github/workflows/deploy.yml",
-        "ARCHITECTURE.md",
-        "README.md"
-      ],
-      "commits": [
-        "a0d5e99",
-        "2952200"
-      ],
-      "tested": "node --check on all touched files; local smoke test (in-memory KV) covering legacy-secret migration + persistence, multi-line add with dedupe/validation, masking, remove-by-index, clear-all + no re-seed, last_ok roundtrip, screen structure (Add/Remove/Back/Home buttons), ForceReply token roundtrip, and no full-key leakage — ALL PASS. Live Telegram verification deferred to the whole-round VERIFY pass.",
-      "concerns": "First deploy with the new binding runs predeploy.mjs: it creates CODEX_KV via the CF API and rewrites wrangler.toml's placeholder id inside the runner before wrangler deploys. Worth watching the Actions log of the push that follows to confirm the binding attached."
-    },
-    {
-      "id": "fix-04",
-      "name": "Switch to gemini-flash-lite-latest + multi-key rotation with sticky last-successful key",
-      "status": "done",
-      "notes": "COMPLETE (e9cac4f). gemini.js call layer rewritten: pool via keypool.getKeys (KV, legacy secret auto-migrated), requests start from persisted 'gemini:last_ok_idx' and persist the new index on success. Rotation triggers match Gemini's actual key-specific failures only: 429 (per-key rate/quota), 403 with PERMISSION_DENIED/quota body, 400 with API_KEY_INVALID/'API key not valid', 401. 5xx = one same-key retry then bubble (no rotation); other 4xx fail immediately (no pool burn). All-keys-exhausted raises allKeysFailed -> operator-facing message points at /menu -> Settings -> Keys, wired into the three user-visible failure paths (routeFreeText dispatch, photo filing, voice transcription in media.js). Model default 'gemini-flash-lite-latest' in both gemini.js fallback and wrangler.toml (step A). media.js voice key-gate now checks the KV pool instead of the legacy secret directly.",
-      "files": [
-        "worker/src/gemini.js",
-        "worker/src/media.js",
-        "worker/src/keypool.js",
-        "worker/wrangler.toml",
-        "ARCHITECTURE.md"
-      ],
-      "commits": [
-        "e9cac4f",
-        "a0d5e99"
-      ],
-      "tested": "Mocked-Gemini-API test suite (10 scenarios) ALL PASS: model alias on the wire; no-rotation fast path; 429 rotation + last_ok persisted; next request starts at working key (1 call); 400-invalid + 403-denied rotation; 503 same-key retry x1 then bubble without rotation; non-key 400 no rotation; all-keys-failed specific message; empty pool error; legacy-secret one-key fallback without KV. node --check passes on all touched files.",
-      "concerns": "none"
+      "name": "Complete UI coverage — every capability operable tap-only from the home interface",
+      "status": "pending",
+      "notes": "Audit every capability in ARCHITECTURE.md and every command in commands.js / Gemini-dispatched action in gemini.js; confirm a genuine tap-only path from /start → home → drill-down for each. Specific known gaps to check: delete a note/entry or topic while browsing/reading (add tappable delete on browse + read screens with existing confirm step); edit an entry found while reading (tappable Edit → ForceReply for instruction, same as Gemini-dispatched edit path); create a new topic (tappable 'New topic' from home/browse via ForceReply); add a note to a specific existing topic found while browsing ('Add note here' per topic → ForceReply, same as /add flow); export reachable from home AND from every individual topic (branch export); anything else in ARCHITECTURE.md's capability list. Use the established ui.js pattern (screen structure, Back/Home navigation, ForceReply + pending.js tokens). Typed commands remain as fast-path. VERIFY FOR REAL: starting only from /start with no other command typed, perform a full cycle — create topic, add note via tap-only entry point, read, edit via tap-only edit, export just that topic, delete the note, delete the topic — entirely by tapping.",
+      "files": [],
+      "commits": [],
+      "tested": "not yet",
+      "concerns": "none yet"
     }
   ],
   "verification": {
-    "date_utc": "2026-09-03",
-    "harness": "Out-of-tree node harness loading the real worker/src modules through the index.js fetch entry; Telegram Bot API, GitHub REST (seeded from the real repo's notebook/ tree), Gemini generateContent, and CODEX_KV mocked at the fetch boundary; every Gemini request inspected on the wire. 60 assertions, 60 passed.",
-    "fix_01": "PASS — unspecified text note filed via live dispatch+auto-file path; confirmation names entry id + topic title + breadcrumb, with View/Move/New-topic keyboard; entry persisted to the store.",
-    "fix_02": "PASS — .txt without caption: content (not filename) sent to Gemini, content-aware new-topic filing, specific confirmation, body persisted. .md with caption: caption+content both reached Gemini, caption steered placement. 'add this to X:' caption fast-path: ZERO Gemini calls (quota rule held). Non-text document politely declined with no Gemini call.",
-    "fix_03": "PASS — /start and /menu draw the home screen (Browse/Export/Settings); tap-only traversal home→settings→keys, home→browse→topic→read, home→export-chooser; every screen carries Back/Home. Settings→Keys: newline-separated multi-key add in one message (3 added, 1 dup skipped, count summary), masked last-4 listing with no full-key leakage, tap-remove by index, two-tap clear-all, legacy secret NOT re-seeded after deliberate clear. Legacy GEMINI_API_KEY secret auto-migrated into the KV pool once (migration flag). /help is interface-first. Deploy log proves CODEX_KV provisioned by predeploy.mjs via the CF API inside the GitHub-connected pipeline — no dashboard interaction.",
-    "fix_04": "PASS — every outgoing request used model gemini-flash-lite-latest. 429/RESOURCE_EXHAUSTED on key 0 rotated to key 1 mid-request, request succeeded, gemini:last_ok_idx persisted; the next request started on the working key with zero wasted calls to the dead key. 503 retried once on the SAME key without rotation. 400 INVALID_ARGUMENT failed immediately without burning the pool. All-keys-429 produced the specific operator-facing failure pointing at /menu → Settings → Keys.",
-    "live_limits": "A physical tap-through on the operator's own Telegram client cannot be performed from this environment (the bot token/chat are intentionally unavailable). Equivalent evidence: the deployed worker is the exact commit verified above, it answered real Telegram traffic post-deploy (6747b91), webhook auth rejects unsigned probes, and every screen/flow was exercised through the real routing code."
+    "date_utc": null,
+    "notes": "Whole-round VERIFY pending: fix-01, fix-02, fix-03 individual VERIFY steps must all pass against the actual live deployed bot, in order (fix-01 first). After all fixes deployed: re-send one plain free-text note with no explicit destination and confirm correct completion feedback naming the actual topic (regression check against v2's fix-01). Only then mark fixes_complete: true, commit, push.",
+    "live_evidence": []
   }
 }
