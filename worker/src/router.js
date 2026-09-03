@@ -1,31 +1,96 @@
-// Task-03 scaffold router — replaced by the full command/callback
-// implementations in tasks 05-09. Keeps the Worker deployable and
-// verifiably alive from the very first deploy.
+// Message routing. Manual commands and ForceReply-driven flows are fully
+// deterministic. Free text/voice/photos without an explicit destination go
+// to the Gemini dispatch layer (tasks 06/07) — which is imported lazily so
+// the manual path contains no Gemini code at all.
+
+import { sendText } from './telegram.js';
+import { handleCommand } from './commands.js';
+import { parsePending } from './pending.js';
+import { resolveH8, resolvePath } from './tree.js';
+import { appendEntry, createNode, moveEntry, readNode } from './notes.js';
+import { h8 } from './util.js';
+import { handlePhotoMessage, handleVoiceMessage } from './media.js';
+import { routeCallbackQuery } from './callbacks.js';
+
+export { routeCallbackQuery };
 
 export async function routeMessage(message, env) {
   const chatId = message.chat && message.chat.id;
   if (!chatId) return;
-  await sendTelegram(env, 'sendMessage', {
-    chat_id: chatId,
-    text: 'Codex is online. Full command handling ships with the next build steps.',
-  });
-}
+  const text = (message.text || message.caption || '').trim();
 
-export async function routeCallbackQuery(query, env) {
-  await sendTelegram(env, 'answerCallbackQuery', {
-    callback_query_id: query.id,
-    text: 'Codex scaffold online.',
-  });
-}
-
-async function sendTelegram(env, method, payload) {
-  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    console.error('telegram error', method, res.status, await res.text());
+  // 1) Pending ForceReply flows (deterministic)
+  const pending = parsePending(message);
+  if (pending) {
+    const handled = await handlePendingFlow(env, message, pending);
+    if (handled) return;
   }
-  return res;
+
+  // 2) Slash commands (deterministic, zero Gemini)
+  if (message.text && message.text.startsWith('/')) {
+    const handled = await handleCommand(env, message);
+    if (handled) return;
+    await sendText(env, chatId, 'Unknown command. Try /help.');
+    return;
+  }
+
+  // 3) Media ingestion (task-06): photos file deterministically when a
+  //    destination is explicit; voice notes need transcription (task-07).
+  if (message.photo && message.photo.length) {
+    await handlePhotoMessage(env, message, null);
+    return;
+  }
+  if (message.voice || message.audio) {
+    await handleVoiceMessage(env, message);
+    return;
+  }
+
+  // 4) Free text -> Gemini auto-file dispatch (task-07)
+  if (text) {
+    const { routeFreeText } = await import('./gemini.js');
+    await routeFreeText(env, message, text);
+  }
+}
+
+async function handlePendingFlow(env, message, pending) {
+  const chatId = message.chat.id;
+  const { flow, handle, extra } = pending;
+
+  if (flow === 'add') {
+    const path = await resolveH8(env, handle);
+    if (path === null) { await sendText(env, chatId, 'That topic no longer exists.'); return true; }
+    if (message.photo && message.photo.length) {
+      await handlePhotoMessage(env, message, path);
+      return true;
+    }
+    if (message.voice || message.audio) {
+      await handleVoiceMessage(env, message, path);
+      return true;
+    }
+    const text = (message.text || '').trim();
+    if (!text) { await sendText(env, chatId, 'Send text or a photo for the note.'); return true; }
+    await appendEntry(env, path, text);
+    const node = await readNode(env, path);
+    await sendText(env, chatId, `✅ Added to ${node ? node.title : path}.`);
+    return true;
+  }
+
+  if (flow === 'newtopic') {
+    // handle = h8 of current node, extra = entry id; message.text = new topic name
+    const name = (message.text || '').trim();
+    if (!name) { await sendText(env, chatId, 'Send a topic name, or tap Cancel.'); return true; }
+    const fromPath = await resolveH8(env, handle);
+    if (fromPath === null) { await sendText(env, chatId, 'Original note no longer found.'); return true; }
+    try {
+      const made = await createNode(env, '', name);
+      await moveEntry(env, fromPath, extra, made.path);
+      await sendText(env, chatId, `✅ Created "${name}" and moved the note there.`);
+    } catch (e) {
+      console.error(e);
+      await sendText(env, chatId, '❌ Could not create/move. Try again.');
+    }
+    return true;
+  }
+
+  return false;
 }
