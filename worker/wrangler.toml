@@ -11,10 +11,20 @@ rules = [
 REPO_OWNER = "vjumbo264"
 REPO_NAME = "codex"
 REPO_BRANCH = "main"
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-flash-lite-latest"
+
+# Gemini key pool storage (fix-03). The namespace is auto-provisioned by
+# scripts/predeploy.mjs (runs in the deploy workflow): it creates the
+# namespace via the Cloudflare API when missing and stamps its id here, so
+# no Cloudflare dashboard access is ever required. The placeholder id is
+# never used for a deploy.
+[[kv_namespaces]]
+binding = "CODEX_KV"
+id = "00000000000000000000000000000000"
 
 # Secrets (set via Cloudflare dashboard/API — never in this file):
 #   TELEGRAM_BOT_TOKEN  - Bot API token
 #   GITHUB_REPO_TOKEN   - fine-grained PAT, contents read/write on vjumbo264/codex
 #   WEBHOOK_SECRET      - random token; Telegram sends it as X-Telegram-Bot-Api-Secret-Token
-#   GEMINI_API_KEY      - added by the operator after build (see README)
+#   GEMINI_API_KEY      - legacy single key; auto-migrated into the KV key
+#                         pool on first use (Settings → Keys in the bot)

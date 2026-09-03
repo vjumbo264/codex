@@ -3,6 +3,7 @@
 // routes the update. Manual commands/buttons never touch Gemini. (redeploy)
 
 import { routeMessage, routeCallbackQuery } from './router.js';
+import { syncCommandMenu } from './telegram.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -28,6 +29,9 @@ export default {
     ctx.waitUntil(
       (async () => {
         try {
+          // Keep the `/` command menu matching the implementation (runs at
+          // most once per day; a no-op otherwise).
+          await syncCommandMenu(env);
           if (update.message) {
             await routeMessage(update.message, env);
           } else if (update.callback_query) {

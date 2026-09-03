@@ -58,6 +58,36 @@ export async function sendDocumentBytes(env, chatId, bytes, filename, caption) {
   return data.result;
 }
 
+// Keep the Telegram `/` command menu in sync with what's actually
+// implemented. Called at most once per UTC day per KV namespace so this is
+// effectively free after the first update of the day.
+const COMMANDS = [
+  { command: 'start', description: 'Open the home menu' },
+  { command: 'menu', description: 'Open the home menu' },
+  { command: 'topics', description: 'Browse the notebook tree' },
+  { command: 'new', description: 'Create a topic: /new travel/japan' },
+  { command: 'add', description: 'Add a note to an exact topic' },
+  { command: 'read', description: 'Read a topic in chat' },
+  { command: 'export', description: 'PDF of a topic, or /export all' },
+  { command: 'delete', description: 'Delete a topic or one entry' },
+  { command: 'help', description: 'How to use Codex' },
+];
+
+export async function syncCommandMenu(env) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (env.CODEX_KV) {
+    try {
+      const last = await env.CODEX_KV.get('sys:cmd_synced');
+      if (last === today) return;
+    } catch { /* fall through and try anyway */ }
+  }
+  const out = await tg(env, 'setMyCommands', { commands: COMMANDS });
+  if (out !== null && env.CODEX_KV) {
+    try { await env.CODEX_KV.put('sys:cmd_synced', today); } catch { /* non-fatal */ }
+  }
+  return out;
+}
+
 export function answerCb(env, callbackQueryId, text) {
   const payload = { callback_query_id: callbackQueryId };
   if (text) payload.text = text.slice(0, 200);
