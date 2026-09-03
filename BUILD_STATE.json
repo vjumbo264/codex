@@ -2,7 +2,7 @@
   "project": "codex",
   "repo": "https://github.com/vjumbo264/codex",
   "build_complete": false,
-  "current_task": "task-12",
+  "current_task": "task-13",
   "last_updated_utc": "2026-09-03",
   "session_history": [
     {
@@ -19,6 +19,11 @@
       "session": 1,
       "date_utc": "2026-09-03",
       "summary": "tasks 05-11 complete: full bot implemented and deployed (version e44fb54b), webhook set + verified, command menu registered. Remaining: README (task-12), final live verification (task-13)."
+    },
+    {
+      "session": 2,
+      "date_utc": "2026-09-03",
+      "summary": "Resumed. task-12 confirmed complete on origin (commit 2231eea) - checkpoint updated to reflect reality. Purged stale zz-e2e verification nodes left by a prior session. Starting task-13 live verification pass."
     }
   ],
   "tasks": [
@@ -159,11 +164,13 @@
     {
       "id": "task-12",
       "name": "Write README: phone/browser-friendly Gemini key setup + usage guide",
-      "status": "pending",
-      "notes": "No CLI/desktop assumptions — operator uses Android + Termux + browser dashboards. Steps to add GEMINI_API_KEY Worker secret via Cloudflare dashboard. Usage: capture, browse, read, export, edit, delete — manual and via Gemini.",
+      "status": "done",
+      "notes": "README.md landed in commit 2231eea: phone-friendly Gemini API key setup (aistudio.google.com/apikey -> Cloudflare dashboard -> Worker `codex-bot` -> Settings -> Variables and Secrets -> Add GEMINI_API_KEY as Secret, no redeploy needed); usage guide covering capture (text/voice/photo/explicit-to-topic/new-topic), manual commands (/new /add /topics /read /export /delete /help \u2014 always work, zero Gemini), plain-language 'just ask' section (read/export/delete/edit/browse via Gemini), how-it-works diagram, ARCHITECTURE.md link, known limitations, secrets inventory. No CLI/desktop assumptions; Termux mentioned only as an optional equivalent. task-01..task-11 are the prior sessions' baseline.",
       "files": [],
-      "commits": [],
-      "tested": "",
+      "commits": [
+        "2231eea9"
+      ],
+      "tested": "README read against required checklist: Gemini key steps phone-friendly (dashboard-only), capture/browse/read/export/edit/delete both manual and via Gemini all covered.",
       "concerns": ""
     },
     {
