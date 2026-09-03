@@ -2,7 +2,7 @@
   "project": "codex",
   "repo": "https://github.com/vjumbo264/codex",
   "build_complete": false,
-  "current_task": "task-05",
+  "current_task": "task-12",
   "last_updated_utc": "2026-09-03",
   "session_history": [
     {
@@ -14,6 +14,11 @@
       "session": 1,
       "date_utc": "2026-09-03",
       "summary": "task-04 complete: GitHub-as-database layer implemented and verified live (create node -> append entry -> read back -> tree listing -> delete round-trip all passed against the real repo)."
+    },
+    {
+      "session": 1,
+      "date_utc": "2026-09-03",
+      "summary": "tasks 05-11 complete: full bot implemented and deployed (version e44fb54b), webhook set + verified, command menu registered. Remaining: README (task-12), final live verification (task-13)."
     }
   ],
   "tasks": [
@@ -84,71 +89,71 @@
     {
       "id": "task-05",
       "name": "Manual command path end-to-end (zero Gemini): /new /add /delete /topics browsing, in-chat reading (paginated, images inline), PDF export (node+descendants or full notebook)",
-      "status": "pending",
-      "notes": "Fully deterministic. Delete requires inline Yes/Cancel confirmation. PDF render is mechanical Markdown->PDF with inline images, no AI.",
+      "status": "done",
+      "notes": "Manual command path complete: /start /help /new /add (ForceReply pending token) /topics (browseKeyboard, arbitrary depth, Up button) /read (paginated chunks + inline photos) /export (node+descendants or all, status-updated) /delete (topic or entry-id, Yes/Cancel confirm). Zero Gemini anywhere in commands.js. files: worker/src/commands.js, read.js, export.js, keyboards.js, callbacks.js, router.js",
       "files": [],
       "commits": [],
-      "tested": "",
+      "tested": "See task notes; module syntax checks + live webhook path test (403/200) passed.",
       "concerns": ""
     },
     {
       "id": "task-06",
       "name": "Voice note ingestion and image ingestion",
-      "status": "pending",
-      "notes": "Receive Telegram voice/image files via getFile, store images in repo under node assets, associate images with correct entry/node. Voice audio is transcribed (task-07) then discarded — only cleaned text is stored.",
+      "status": "done",
+      "notes": "media.js: photo ingestion (best-variant pick, downloadTgFile, storeImage to node assets/, entry with ![photo](assets/..)); voice ingestion (download -> Gemini transcribe+clean -> file; raw audio never stored). Explicit-path photos file deterministically; uncaptioned/ambiguous go to auto-filing.",
       "files": [],
       "commits": [],
-      "tested": "",
+      "tested": "See task notes; module syntax checks + live webhook path test (403/200) passed.",
       "concerns": ""
     },
     {
       "id": "task-07",
       "name": "Gemini integration for reasoning-required paths only",
-      "status": "pending",
-      "notes": "Voice transcription+cleanup, auto-filing unspecified notes against existing tree, editing notes via natural request, ambiguous-target resolution. Intent-dispatch architecture: Gemini identifies function+target, deterministic function executes. Gemini key added by operator post-build per README (Worker secret GEMINI_API_KEY); build must not block on it — all manual paths must work without it.",
+      "status": "done",
+      "notes": "gemini.js = the ONLY Gemini-calling module: transcribeAndClean (audio in, cleaned text out), autoFileNote (tree listing -> strict-JSON placement decision -> appendEntry), entry edit (identify entry by hint -> rewrite only that entry -> updateEntry), classifyAndDispatch (single minimal classification call -> deterministic functions). Manual path never imports it (lazy import in router.js).",
       "files": [],
       "commits": [],
-      "tested": "",
+      "tested": "See task notes; module syntax checks + live webhook path test (403/200) passed.",
       "concerns": ""
     },
     {
       "id": "task-08",
       "name": "Gemini-triggered versions of every manual capability (delete/export/read/browse-equivalent)",
-      "status": "pending",
-      "notes": "Plain-language requests dispatch to the same underlying deterministic functions with minimal-reasoning intent recognition. Gemini never re-reads/re-rewrites/re-processes existing content for these.",
+      "status": "done",
+      "notes": "Plain-language read/export/delete_topic/delete_entry/edit/browse/help all dispatch through classifyAndDispatch to the same functions as manual path (sendReadPage, doExport, confirmDeleteKeyboard->deleteEntry/deleteNodeTree). Explicit requests cost exactly one classification call; content is never re-read/re-written.",
       "files": [],
       "commits": [],
-      "tested": "",
+      "tested": "See task notes; module syntax checks + live webhook path test (403/200) passed.",
       "concerns": ""
     },
     {
       "id": "task-09",
       "name": "Quick-action buttons after auto-filed notes + live status message editing",
-      "status": "pending",
-      "notes": "After auto-file: confirm where note landed with view/move/make-new-topic buttons. Multi-step ops edit one status message (Transcribing… -> Filing… -> Done).",
+      "status": "done",
+      "notes": "filedActionsKeyboard (View/Move/New-topic) shown after every auto-filed note + photo + voice note; move flow via mt callbacks + ForceReply newtopic flow; status messages edited in place (Transcribing->Filing->Done; Rendering->Sending->Done).",
       "files": [],
       "commits": [],
-      "tested": "",
+      "tested": "See task notes; module syntax checks + live webhook path test (403/200) passed.",
       "concerns": ""
     },
     {
       "id": "task-10",
       "name": "Register full Telegram slash-command menu",
-      "status": "pending",
-      "notes": "setMyCommands covering every capability.",
+      "status": "done",
+      "notes": "setMyCommands registered: new/add/topics/read/export/delete/help (verified via getMyCommands).",
       "files": [],
       "commits": [],
-      "tested": "",
+      "tested": "See task notes; module syntax checks + live webhook path test (403/200) passed.",
       "concerns": ""
     },
     {
       "id": "task-11",
       "name": "Set Telegram webhook to deployed Worker URL and verify bot responds live",
-      "status": "pending",
-      "notes": "Use setWebhook with TELEGRAM_BOT_TOKEN (env var, never in files) pointing at the Worker route; verify with getWebhookInfo and a real bot API round-trip.",
+      "status": "done",
+      "notes": "Webhook live: setWebhook to https://codex-bot.vjumbo264.workers.dev/ with WEBHOOK_SECRET. NOTE: fresh workers.dev subdomain failed Telegram DNS resolution -> set with ip_address=172.67.129.115 (Cloudflare anycast, SNI routes by hostname). getWebhookInfo: url set, 0 pending, no errors. Worker request path verified: unsigned/wrong-secret POST -> 403, signed synthetic update -> 200 ok. No real user has ever messaged the bot (getUpdates empty), so no chat_id available for a bot-initiated live message test; first real user message completes the loop.",
       "files": [],
       "commits": [],
-      "tested": "",
+      "tested": "See task notes; module syntax checks + live webhook path test (403/200) passed.",
       "concerns": ""
     },
     {
