@@ -1,0 +1,57 @@
+{
+  "project": "codex",
+  "repo": "https://github.com/vjumbo264/codex",
+  "round": "persistent-session-fix-v2",
+  "fixes_complete": false,
+  "current_fix": "fix-01",
+  "last_updated_utc": "2026-09-03",
+  "session_history": [
+    {
+      "session": 1,
+      "date_utc": "2026-09-03",
+      "summary": "Seeded FIX_STATE.json with the four-fix contract (fix-01..fix-04). All fixes pending. Push-access proof commit."
+    }
+  ],
+  "fixes": [
+    {
+      "id": "fix-01",
+      "name": "Consistent Gemini action feedback",
+      "status": "pending",
+      "notes": "Every Gemini-driven action (auto-file text, auto-file photo, auto-file voice, edit entry, delete entry via Gemini intent, delete topic via Gemini intent, read/export/browse dispatched by Gemini) must end with a clear, specific, plain-language confirmation message stating exactly what was done (which topic, what changed, what was deleted/created). Audit every code path in gemini.js/media.js/router.js/callbacks.js. Not a generic ✅ Done — specific. Delete-confirm callback D handler currently says '🗑 Entry deleted.' / '🗑 Deleted \"X\" (N files).' — the topic case is specific; the entry case is generic and should include which topic it was in. Voice auto-file relies on autoFileNote for confirmation (already specific). Manual /add path already specific. Photo explicit-path path already specific. Verify each and fix.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    },
+    {
+      "id": "fix-02",
+      "name": "Accept uploaded text files as note input",
+      "status": "pending",
+      "notes": "Add a document-message handler to router.js so Telegram document uploads with a text MIME type (text/*, application/json/xml/yaml, .md/.txt/.csv/.log) are read as notes. With caption -> caption is filing hint (same as free-text auto-file); without caption -> pure auto-file on file content. Content is cleaned up like voice-cleanup path when raw text is unstructured. Fits dual manual/Gemini path model + quota rule. Reuse routeFreeText / autoFileNote.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    },
+    {
+      "id": "fix-03",
+      "name": "Telegram-native home interface + Settings/Keys sub-interface, KV-backed key pool",
+      "status": "pending",
+      "notes": "Persistent tappable home menu on /start and /menu. Sections: Browse, Read (pick), Export (pick), Settings. Every screen: title line, buttons, Back, Home. Settings sub-menu with Gemini Keys screen. Keys stored in a new Cloudflare KV namespace CODEX_KV bound in wrangler.toml (id auto-provisioned in the Cloudflare deploy pipeline via wrangler; if binding-only wrangler cannot auto-create the namespace, do a one-time provision via CF API using the GITHUB_REPO_TOKEN-equivalent CF creds already present in GH Actions secrets). Keys pasted newline-separated in one message. Masked list view (last 4 chars), tap-to-remove per index, Clear All. Seed migration: if env.GEMINI_API_KEY exists at runtime and KV pool is empty, treat it as key #1 automatically (persist to KV on first read). Register bot command menu (setMyCommands) with /start /menu /help.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": "KV namespace creation: wrangler deploy alone does not create KV namespaces — the binding in wrangler.toml requires the namespace id to already exist. Must provision the KV namespace via CF API from GH Actions during deploy (add a step in .github/workflows/deploy.yml that creates the namespace if missing and writes the id into wrangler.toml before wrangler deploy). Alternatively, add a `[[kv_namespaces]]` binding + a preview_id and let wrangler auto-create via its own API using CLOUDFLARE_API_TOKEN. Verify which mechanism works with wrangler v4."
+    },
+    {
+      "id": "fix-04",
+      "name": "Switch to gemini-flash-lite-latest + multi-key rotation with sticky last-successful key",
+      "status": "pending",
+      "notes": "Change GEMINI_MODEL default to gemini-flash-lite-latest in wrangler.toml AND in gemini.js fallback string. Rewrite gemini() to iterate the key pool (from KV via fix-03), starting from the last-successful key index (stored in KV under key 'gemini:last_ok_idx'). Only rotate on key-specific failures: 429 (RESOURCE_EXHAUSTED), 403 (PERMISSION_DENIED/API_KEY_INVALID), 400 API_KEY_INVALID. On 500/503 do NOT rotate — retry once on same key then bubble. On success, persist new index. If all keys exhausted, surface a specific failure message via the fix-01 feedback style.",
+      "files": [],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
+    }
+  ]
+}
