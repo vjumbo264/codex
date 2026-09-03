@@ -1,8 +1,8 @@
 {
   "project": "codex",
   "repo": "https://github.com/vjumbo264/codex",
-  "build_complete": false,
-  "current_task": "task-13",
+  "build_complete": true,
+  "current_task": null,
   "last_updated_utc": "2026-09-03",
   "session_history": [
     {
@@ -24,6 +24,11 @@
       "session": 2,
       "date_utc": "2026-09-03",
       "summary": "Resumed. task-12 confirmed complete on origin (commit 2231eea) - checkpoint updated to reflect reality. Purged stale zz-e2e verification nodes left by a prior session. Starting task-13 live verification pass."
+    },
+    {
+      "session": 3,
+      "date_utc": "2026-09-03",
+      "summary": "task-13 live verification passed; rotated+redeployed WEBHOOK_SECRET; removed diagnostic commit and all test namespaces; marked build_complete."
     }
   ],
   "tasks": [
@@ -176,12 +181,12 @@
     {
       "id": "task-13",
       "name": "End-to-end live verification of every required capability; then set build_complete: true",
-      "status": "pending",
-      "notes": "Exercise all required capabilities against the live bot. Spot-check that manual/explicit operations make zero Gemini calls. Only then mark build_complete: true, commit, push.",
+      "status": "done",
+      "notes": "Live end-to-end verification passed. Webhook auth gate rejects bad secrets (403) and accepts correct ones (200). Manual zero-Gemini path verified live: /start, /new (nested e2e/travel/japan), /add via ForceReply pending flow (entry persisted to notebook/.../japan/index.md), /read, /topics browse keyboard, /export PDF, /delete behind Yes/Cancel inline buttons. Cancel gate preserves the node; confirm deletes remove node+descendants and commit. Voice note without GEMINI_API_KEY degrades gracefully (prompts for key, no crash). Zero-Gemini quota rule confirmed structurally: gemini.js only lazy-imported in router.js free-text branch and media.js auto-file/transcription; commands/callbacks/notes/export/pdf/read/keyboards contain no Gemini calls. Slash menu registered (new,add,topics,read,export,delete,help). Cleaned all test namespaces (e2e, zzd-99d22b, zzr-99d278). Rotated WEBHOOK_SECRET via API and redeployed to flush stale cache.",
       "files": [],
       "commits": [],
-      "tested": "",
-      "concerns": ""
+      "tested": "All capabilities exercised against live bot via webhook round-trips; effects confirmed in repo and Telegram API.",
+      "concerns": "Operator must add GEMINI_API_KEY Worker secret to enable voice transcription/auto-filing/edit-by-request (see README)."
     }
   ]
 }
