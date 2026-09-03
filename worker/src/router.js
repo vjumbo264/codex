@@ -59,6 +59,10 @@ async function handlePendingFlow(env, message, pending) {
   if (flow === 'add') {
     const path = await resolveH8(env, handle);
     if (path === null) { await sendText(env, chatId, 'That topic no longer exists.'); return true; }
+    if (message.text && /^(cancel|stop|abort|never ?mind)$/i.test(message.text.trim())) {
+      await sendText(env, chatId, 'Cancelled.');
+      return true;
+    }
     if (message.photo && message.photo.length) {
       await handlePhotoMessage(env, message, path);
       return true;
@@ -77,6 +81,10 @@ async function handlePendingFlow(env, message, pending) {
 
   if (flow === 'newtopic') {
     // handle = h8 of current node, extra = entry id; message.text = new topic name
+    if (message.text && /^(cancel|stop|abort|never ?mind)$/i.test(message.text.trim())) {
+      await sendText(env, chatId, 'Cancelled.');
+      return true;
+    }
     const name = (message.text || '').trim();
     if (!name) { await sendText(env, chatId, 'Send a topic name, or tap Cancel.'); return true; }
     const fromPath = await resolveH8(env, handle);
