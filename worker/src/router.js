@@ -9,7 +9,7 @@ import { parsePending } from './pending.js';
 import { resolveH8, resolvePath } from './tree.js';
 import { appendEntry, createNode, moveEntry, readNode } from './notes.js';
 import { h8 } from './util.js';
-import { handlePhotoMessage, handleVoiceMessage } from './media.js';
+import { handlePhotoMessage, handleVoiceMessage, handleDocumentMessage } from './media.js';
 import { routeCallbackQuery } from './callbacks.js';
 
 export { routeCallbackQuery };
@@ -35,13 +35,18 @@ export async function routeMessage(message, env) {
   }
 
   // 3) Media ingestion (task-06): photos file deterministically when a
-  //    destination is explicit; voice notes need transcription (task-07).
+  //    destination is explicit; voice notes need transcription (task-07);
+  //    text-bearing documents (fix-02) are read as note content.
   if (message.photo && message.photo.length) {
     await handlePhotoMessage(env, message, null);
     return;
   }
   if (message.voice || message.audio) {
     await handleVoiceMessage(env, message);
+    return;
+  }
+  if (message.document) {
+    await handleDocumentMessage(env, message, null);
     return;
   }
 
@@ -69,6 +74,10 @@ async function handlePendingFlow(env, message, pending) {
     }
     if (message.voice || message.audio) {
       await handleVoiceMessage(env, message, path);
+      return true;
+    }
+    if (message.document) {
+      await handleDocumentMessage(env, message, path);
       return true;
     }
     const text = (message.text || '').trim();

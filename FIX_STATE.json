@@ -3,7 +3,7 @@
   "repo": "https://github.com/vjumbo264/codex",
   "round": "persistent-session-fix-v2",
   "fixes_complete": false,
-  "current_fix": "fix-02",
+  "current_fix": "fix-03",
   "last_updated_utc": "2026-09-03",
   "session_history": [
     {
@@ -15,6 +15,11 @@
       "session": 1,
       "date_utc": "2026-09-03",
       "summary": "fix-01 complete: audited every Gemini-driven action path and made every completion message specific (topic title + breadcrumb + entry id for filing; topic + breadcrumb + entry id for edit/delete/move). Files: callbacks.js, gemini.js, media.js, commands.js, router.js."
+    },
+    {
+      "session": 1,
+      "date_utc": "2026-09-03",
+      "summary": "fix-02 complete: text-bearing document uploads (.txt/.md/.csv/.log/.json/.yaml/.xml + any text/* MIME) are accepted, downloaded, decoded (UTF-8 with BOM strip, size cap 256 KB), and routed. With caption -> caption acts as filing hint (fast-path add-to/new-topic patterns keep zero-Gemini path); without caption -> pure auto-file on file content. Explicit-path via /add flow uses zero Gemini quota. Files: media.js (new handleDocumentMessage + helpers), router.js (wire into both main and /add pending path)."
     }
   ],
   "fixes": [
@@ -22,7 +27,7 @@
       "id": "fix-01",
       "name": "Consistent Gemini action feedback",
       "status": "done",
-      "notes": "Every Gemini-driven action path now ends with a specific, plain-language confirmation naming (a) which topic (title + full breadcrumb path with › separator), (b) which entry (entry id) where applicable, and (c) what changed (filed / created + filed / moved from→to / deleted entry from topic / deleted topic + file count / updated entry). Audited: autoFileNote (text auto-file), autoFilePhoto (photo auto-file), voice explicit-path filing (media.js), voice auto-file (delegates to autoFileNote), explicit 'add this to X' free-text, explicit 'new topic X' free-text, /add pending flow (router.js), /new command (commands.js), Gemini edit (gemini.js handleEntryAction edit branch), Gemini delete_entry (D callback in callbacks.js), Gemini delete_topic (D callback in callbacks.js), move-target chosen (mt callback), newtopic pending flow (router.js). Delete-confirm prompts now include the topic breadcrumb so the operator sees exactly what will be deleted before tapping Yes. All syntax-checked with node --check.",
+      "notes": "Every Gemini-driven action path now ends with a specific, plain-language confirmation naming (a) which topic (title + full breadcrumb path with › separator), (b) which entry (entry id) where applicable, and (c) what changed (filed / created + filed / moved from→to / deleted entry from topic / deleted topic + file count / updated entry). Audited: autoFileNote, autoFilePhoto, voice explicit-path filing (media.js), voice auto-file (delegates to autoFileNote), explicit 'add this to X' free-text, explicit 'new topic X' free-text, /add pending flow (router.js), /new command (commands.js), Gemini edit, Gemini delete_entry, Gemini delete_topic, move-target chosen (mt callback), newtopic pending flow (router.js). Delete-confirm prompts now include the topic breadcrumb.",
       "files": [
         "worker/src/callbacks.js",
         "worker/src/gemini.js",
@@ -30,35 +35,38 @@
         "worker/src/commands.js",
         "worker/src/router.js"
       ],
-      "commits": [],
-      "tested": "node --check on every edited file. Behavioral verification with a real message deferred to the whole-round VERIFY pass, since fix-03 adds a new home interface that also needs live testing.",
+      "commits": ["e3c0e07"],
+      "tested": "node --check on every edited file passed. Behavioral verification with real Telegram messages deferred to the whole-round VERIFY pass after fix-03 lands the new home interface.",
       "concerns": "none"
     },
     {
       "id": "fix-02",
       "name": "Accept uploaded text files as note input",
-      "status": "pending",
-      "notes": "Add a document-message handler in router.js so Telegram document uploads with text-bearing MIME/extensions (text/plain, text/markdown, text/*, application/json, application/xml, .txt, .md, .csv, .log, .json, .yaml, .yml, .xml) are treated as notes. With caption -> caption is filing hint (routed through classifyAndDispatch / autoFileNote with the caption prepended to the file body as context); without caption -> pure autoFileNote on file body. If the file's raw text is unstructured, run it through the same cleanup transformation used for voice transcripts. Fits dual manual/Gemini path model + quota rule: destination-known files (via caption 'add to X:' pattern) never call Gemini, matching the free-text explicit-path fast-path. Reuse routeFreeText / autoFileNote. Handle order-flexibility: caption-then-file is the natural single-message Telegram flow; file-first-then-follow-up-text is not supported by Telegram as a single semantic unit, so document the follow-up path as: send the file first (no caption -> it's auto-filed), then send a subsequent 'edit the note about X in Y: <instruction>' if refinement needed. Cap file size at a reasonable Worker-safe budget (256KB text) to avoid quota blowups.",
-      "files": [],
+      "status": "done",
+      "notes": "Added handleDocumentMessage(env, message, explicitPath) to media.js. Detects text-bearing files by MIME (text/*, application/json/xml/yaml/toml) and by extension (.txt/.md/.markdown/.mdown/.mkd/.csv/.tsv/.log/.json/.yaml/.yml/.xml/.ini/.conf/.cfg/.toml/.rst/.org/.tex). Downloads bytes via existing downloadTgFile, strips UTF-8 BOM, decodes as UTF-8 (non-fatal, replacement char on bad bytes), normalizes CRLF -> LF, trims. Size cap: 256 KB (checked pre-download via doc.file_size and post-download via bytes.length). Non-text documents get a polite 'I can only read text-bearing files' reply. Empty files get a specific reply. Order handling: with a caption, caption acts as filing hint; without, pure auto-file. Fast-path preservation: if caption matches 'add this to X:' or 'new topic X:' (trailing ':'), the file body is appended and the deterministic pattern-match branch in routeFreeText fires with ZERO Gemini calls, matching the quota rule in ARCHITECTURE.md §5. Free-form captions are prepended to file content as Gemini context. explicit-path (/add ForceReply) branch is fully deterministic — no Gemini even for unstructured file content, matching how a typed note is treated on the same branch. Router wired both in main path (message.document -> handleDocumentMessage null) and inside pending 'add' flow (message.document -> handleDocumentMessage path). Confirmation feedback follows fix-01 style: ✅ Filed \"<file_name>\" as entry <id> under <title> (<breadcrumb>). Files: media.js (edit), router.js (edit).",
+      "files": [
+        "worker/src/media.js",
+        "worker/src/router.js"
+      ],
       "commits": [],
-      "tested": "",
-      "concerns": ""
+      "tested": "node --check on both edited files passed. Live end-to-end verification (send .txt with/without caption) deferred to the whole-round VERIFY pass.",
+      "concerns": "none"
     },
     {
       "id": "fix-03",
       "name": "Telegram-native home interface + Settings/Keys sub-interface, KV-backed key pool",
       "status": "pending",
-      "notes": "Persistent tappable home menu on /start and /menu. Sections: Browse topics, Read a topic, Export, Settings. Every screen: title line, buttons for actions, Back button, Home button. Settings sub-menu -> Gemini Keys screen. Keys stored in Cloudflare KV namespace CODEX_KV bound in wrangler.toml. Since wrangler v4 will not auto-create KV namespaces from a binding alone, add a step in .github/workflows/deploy.yml (or a small predeploy script) that (a) reads current CODEX_KV binding id from wrangler.toml, (b) if it is the placeholder 'auto', calls the Cloudflare API POST /accounts/{acct}/storage/kv/namespaces to create it, then writes the returned id back into wrangler.toml before wrangler deploy. Keys pasted newline-separated in one message. Masked list view (last 4 chars, indexed). Tap-to-remove per index + Clear All. Seed migration: on every request that reads keys, if the KV pool is empty and env.GEMINI_API_KEY is set, add that key to KV as #1 automatically (so operator keeps working without any manual re-add). Register bot command menu via setMyCommands as one-time on deploy (add a small setup step) with /start /menu /help. Update /help text to describe the tappable interface as the primary way in.",
+      "notes": "Persistent tappable home menu on /start and /menu. Sections: Browse topics, Read a topic (drills to browse->read), Export (Whole notebook / Pick a topic), Settings. Every screen has: title line, buttons for actions, Back button, Home button. Settings sub-menu -> Gemini Keys screen (Add keys / List keys / Clear all / Back / Home). Keys stored in Cloudflare KV namespace CODEX_KV bound in wrangler.toml. Since wrangler v4 will not auto-create KV namespaces from a binding alone, add a step in .github/workflows/deploy.yml (predeploy script) that (a) checks whether the namespace exists via CF API using CLOUDFLARE_API_TOKEN, (b) creates it if missing, (c) writes the id into wrangler.toml before wrangler deploy — idempotent, safe on repeat pushes. Keys pasted newline-separated in one message via ForceReply. Masked list view (last 4 chars, indexed). Tap-to-remove per index + Clear All (with confirmation). Seed migration: on every keypool read, if KV pool is empty and env.GEMINI_API_KEY is set, promote that secret to KV key #1 automatically (so the operator's existing setup keeps working with zero manual re-add). Register bot command menu via setMyCommands on deploy (add small workflow step or inside the Worker on first call) with /start /menu /help. Update /help text to describe the tappable interface as primary.",
       "files": [],
       "commits": [],
       "tested": "",
-      "concerns": "KV namespace auto-provisioning must not require operator Cloudflare-dashboard access. Two options: (A) wrangler.toml declares [[kv_namespaces]] with a preview id and let deploy step create the namespace via CF API using CLOUDFLARE_API_TOKEN (already in GH Actions secrets). (B) Add a tiny .github/workflows step 'ensure-kv' that idempotently creates the namespace if missing and patches wrangler.toml. Pick B — it's the most robust because wrangler v4 won't create a KV namespace at deploy from just a binding declaration."
+      "concerns": "KV namespace auto-provisioning must not require operator dashboard access. Chosen: GH Actions predeploy step. Also update ARCHITECTURE.md §3 to describe CODEX_KV and the key pool model."
     },
     {
       "id": "fix-04",
       "name": "Switch to gemini-flash-lite-latest + multi-key rotation with sticky last-successful key",
       "status": "pending",
-      "notes": "Change GEMINI_MODEL default to gemini-flash-lite-latest in wrangler.toml AND in gemini.js fallback string. Rewrite gemini() to iterate the key pool (from KV via fix-03), starting from the last-successful key index (stored in KV under key 'gemini:last_ok_idx'). Only rotate on key-specific failures: HTTP 429 (RESOURCE_EXHAUSTED), 403 (PERMISSION_DENIED/API_KEY_INVALID), 400 with API_KEY_INVALID in body. Do NOT rotate on 500/503 — retry once on same key then bubble. On success, persist new index. If every key exhausted for this request, surface a specific failure message via the fix-01 feedback style: 'Every configured Gemini key failed (N tried). Add a working key via /menu → Settings → Keys.'",
+      "notes": "Change GEMINI_MODEL default to gemini-flash-lite-latest in wrangler.toml AND in gemini.js fallback string. Rewrite gemini() to iterate the key pool (from KV via fix-03), starting from the last-successful key index (stored in KV under key 'gemini:last_ok_idx'). Only rotate on key-specific failures: HTTP 429 (RESOURCE_EXHAUSTED), 403 (PERMISSION_DENIED/API_KEY_INVALID), 400 with API_KEY_INVALID in body. Do NOT rotate on 500/503 — retry once on same key then bubble. On success, persist new index. If every key exhausted for this request, surface a specific failure message via the fix-01 feedback style.",
       "files": [],
       "commits": [],
       "tested": "",
