@@ -139,12 +139,20 @@ worker/
     ├── notes.js               # entry append/edit/delete, node delete, node read model
     ├── pdf.js                 # mechanical Markdown-tree -> PDF renderer (pdf-lib)
     ├── commands.js            # manual slash-command handlers (zero Gemini)
-    ├── keyboards.js           # inline keyboard builders
-    ├── callbacks.js           # callback_query routing (browse/read/export/delete/move)
+    ├── keyboards.js           # inline keyboard builders (every screen ends in Back/Home)
+    ├── ui.js                  # the tappable app screens: home, export menu, settings, keys (fix-03)
+    ├── keypool.js             # Gemini API key pool in CODEX_KV + legacy-secret migration (fix-03)
+    ├── callbacks.js           # callback_query routing (screens + browse/read/export/delete/move)
     ├── pending.js             # stateless ForceReply context tokens (#cx:…)
     ├── gemini.js              # Gemini intent dispatch, transcription, edit (only file that calls Gemini)
     └── util.js                # ids, dates, chunking, base64url, sha1-h8
 ```
+
+`scripts/predeploy.mjs` runs in the deploy workflow before `wrangler deploy`:
+it creates the `CODEX_KV` KV namespace via the Cloudflare API when missing
+(using the same `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` secrets as the
+deploy step) and stamps its real id into `wrangler.toml` — the namespace
+requires no dashboard interaction, ever.
 
 `.github/workflows/deploy.yml` deploys the Worker on every push to `main`
 that touches `worker/**` (wrangler-action), using GitHub Actions secrets
@@ -157,7 +165,15 @@ GitHub-connected auto-deploy; pushing to `main` is the only deploy step.
 
 Worker **vars** (public, in `wrangler.toml`):
 `REPO_OWNER`, `REPO_NAME`, `REPO_BRANCH`, `GEMINI_MODEL` (default
-`gemini-2.5-flash` — used for both text and audio; one configurable knob).
+`gemini-flash-lite-latest` — the cheapest current model; used for both
+text and audio; one configurable knob).
+
+Worker **bindings**:
+- `CODEX_KV` — KV namespace, declared in `wrangler.toml` and auto-
+  provisioned by `scripts/predeploy.mjs` at deploy time. Holds the Gemini
+  key pool (`gemini:keys`, a JSON array), the last-working key index
+  (`gemini:last_ok_idx`, fix-04), and a once-a-day flag for the Telegram
+  command-menu sync.
 
 Worker **secrets** (set via Cloudflare API/dashboard, never in files):
 - `TELEGRAM_BOT_TOKEN` — Bot API calls.
@@ -165,9 +181,11 @@ Worker **secrets** (set via Cloudflare API/dashboard, never in files):
   read/write. Used only for writes; reads of public raw content need none.
 - `WEBHOOK_SECRET` — random token Telegram sends as
   `X-Telegram-Bot-Api-Secret-Token`; the Worker rejects updates without it.
-- `GEMINI_API_KEY` — **added by the operator after the build** (see README).
-  Every code path checks for its presence: manual commands never need it;
-  Gemini paths reply with a clear "key not configured" message if absent.
+- `GEMINI_API_KEY` — legacy single-key secret. The key pool auto-migrates
+  it: when the KV pool is empty and this secret is present, it is promoted
+  into the pool as key #1, so pre-fix-03 setups keep working with zero
+  manual re-adding. New keys are managed in-chat (Home → Settings → Keys),
+  never via the dashboard.
 
 GitHub Actions **secrets**: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.
 
@@ -190,9 +208,15 @@ detects it (two paths with same h8) and falls back to 12 hex chars.
 
 | op | meaning |
 |----|---------|
+| `h` | home screen (the app's front door, drawn by /start and /menu too) |
+| `s` | settings menu |
+| `sk` | settings → Gemini keys screen (masked list + add/remove/clear) |
+| `ka` | add keys: ForceReply prompt (newline-separated, many at once) |
+| `kr` | remove key by index (tap-only; full keys are never retyped) |
+| `kc` | clear all keys (`kc:root` asks, `kc:confirm` executes) |
 | `b` | browse node (children as buttons + Read/Export/Delete/Up row) |
 | `r` | read node in chat, `<arg>` = page number |
-| `x` | export node + descendants as PDF |
+| `x` | export node + descendants as PDF (`x:menu` = the Export chooser) |
 | `X` | export entire notebook as PDF |
 | `d` | ask delete confirmation (Yes/Cancel) |
 | `D` | confirmed delete — executes |
@@ -202,7 +226,22 @@ detects it (two paths with same h8) and falls back to 12 hex chars.
 | `mt` | move-flow: pick target node |
 | `n` | re-file just-filed entry as a brand-new top-level topic |
 
-### 4.3 Pending input via ForceReply tokens
+### 4.3 The tappable interface (fix-03)
+
+The bot is operated as an app, not by memorized commands. `/start` and
+`/menu` draw the **home screen**; from there every capability — Browse
+(the `b` tree), Read, Export (chooser → whole notebook or a topic),
+Delete confirmations, and **Settings → Gemini API keys** — is reachable by
+taps alone, arbitrarily deep. Every screen follows one pattern: a title
+line, one button per action, and a trailing Back/Home row. Typed slash
+commands remain as an optional fast-path (`/topics`, `/read`, `/export`,
+`/delete`, `/new`, `/add`); the Telegram `/` command menu is kept in sync
+by `syncCommandMenu` (runs at most once per day, flag in KV). Key
+management is tap-only: keys are pasted newline-separated into a
+ForceReply prompt (flow `keys`), listed masked (last 4 chars), and removed
+by index button — a full key value is never displayed or retyped.
+
+### 4.4 Pending input via ForceReply tokens
 
 Multi-step manual flows (`/new`, `/add`, move-by-rename, …) never need
 server state. The bot replies with `ForceReply` and a machine-readable

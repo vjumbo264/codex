@@ -13,6 +13,7 @@
 
 const KEYS_KEY = 'gemini:keys';
 const LAST_OK_KEY = 'gemini:last_ok_idx';
+const MIGRATED_KEY = 'gemini:migrated';
 
 function kv(env) { return env.CODEX_KV || null; }
 
@@ -37,17 +38,29 @@ async function writePool(env, keys) {
   return true;
 }
 
-// The effective key pool. Seeds from the legacy GEMINI_API_KEY secret on
-// first read when the pool is empty (and KV is unavailable, still falls
-// back to that secret so nothing breaks mid-deploy).
+// The effective key pool. Seeds from the legacy GEMINI_API_KEY secret ONCE:
+// when the pool is empty, the secret exists, and the migration flag is not
+// yet set, the secret is promoted into the pool as key #1 and the flag is
+// written. The flag matters: after a deliberate "Clear all keys" the
+// secret must NOT silently reappear. When KV is unavailable the secret is
+// still used as a transient one-key pool so nothing breaks mid-deploy.
 export async function getKeys(env) {
   let keys = await readPool(env);
   if (!keys.length && env.GEMINI_API_KEY) {
-    keys = [env.GEMINI_API_KEY];
     const store = kv(env);
+    let migrated = false;
     if (store) {
-      try { await store.put(KEYS_KEY, JSON.stringify(keys)); }
-      catch (e) { console.error('keypool seed failed', e); }
+      try { migrated = !!(await store.get(MIGRATED_KEY)); }
+      catch { /* treat as not migrated */ }
+    }
+    if (!store || !migrated) {
+      keys = [env.GEMINI_API_KEY];
+      if (store) {
+        try {
+          await store.put(KEYS_KEY, JSON.stringify(keys));
+          await store.put(MIGRATED_KEY, '1');
+        } catch (e) { console.error('keypool seed failed', e); }
+      }
     }
   }
   return keys;
@@ -88,6 +101,11 @@ export async function clearKeys(env) {
   const keys = await getKeys(env);
   await writePool(env, []);
   await setLastOkIndex(env, 0);
+  // Deliberate clear: never re-seed the legacy secret after this.
+  const store = kv(env);
+  if (store) {
+    try { await store.put(MIGRATED_KEY, '1'); } catch { /* non-fatal */ }
+  }
   return keys.length;
 }
 

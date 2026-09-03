@@ -61,6 +61,34 @@ async function handlePendingFlow(env, message, pending) {
   const chatId = message.chat.id;
   const { flow, handle, extra } = pending;
 
+  if (flow === 'keys') {
+    // Settings → Keys → Add (fix-03): newline-separated keys in one message.
+    if (message.text && /^(cancel|stop|abort|never ?mind)$/i.test(message.text.trim())) {
+      await sendText(env, chatId, 'Cancelled.');
+      return true;
+    }
+    const text = (message.text || '').trim();
+    if (!text) {
+      await sendText(env, chatId, 'Send the key(s) as text, one per line.');
+      return true;
+    }
+    const candidates = text.split('\n').map(s => s.trim()).filter(Boolean);
+    const { addKeys } = await import('./keypool.js');
+    const { keysScreen } = await import('./ui.js');
+    const res = await addKeys(env, candidates);
+    let head;
+    if (res.added === 0) {
+      head = `⚠️ No keys added — ${res.skipped} line${res.skipped === 1 ? ' was' : 's were'} invalid or already stored.`;
+    } else {
+      head = `✅ Added ${res.added} Gemini API key${res.added === 1 ? '' : 's'}` +
+        (res.skipped ? ` (skipped ${res.skipped} invalid/duplicate line${res.skipped === 1 ? '' : 's'})` : '') +
+        `. ${res.total} key${res.total === 1 ? '' : 's'} now configured.`;
+    }
+    const screen = await keysScreen(env);
+    await sendText(env, chatId, `${head}\n\n${screen.text}`, { keyboard: screen.keyboard });
+    return true;
+  }
+
   if (flow === 'add') {
     const path = await resolveH8(env, handle);
     if (path === null) { await sendText(env, chatId, 'That topic no longer exists.'); return true; }

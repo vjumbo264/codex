@@ -2,7 +2,10 @@
 
 import { h8 } from './util.js';
 
-function btn(text, data) { return { text, callback_data: data }; }
+export function btn(text, data) { return { text, callback_data: data }; }
+
+// One consistent app pattern (fix-03): every screen ends with a Home
+// button so the operator can always get back to the top by tapping.
 
 // Browse keyboard for a node: one button per child, then an action row.
 export async function browseKeyboard(nodePath, children, { backTo } = {}) {
@@ -21,7 +24,9 @@ export async function browseKeyboard(nodePath, children, { backTo } = {}) {
     rows.push([btn('📄 Export whole notebook', 'X:root')]);
   }
   if (backTo !== undefined && backTo !== null) {
-    rows.push([btn('⬆️ Up', `b:${backTo === '' ? 'root' : await h8(backTo)}`)]);
+    rows.push([btn('⬆️ Up', `b:${backTo === '' ? 'root' : await h8(backTo)}`), btn('🏠 Home', 'h:root')]);
+  } else {
+    rows.push([btn('🏠 Home', 'h:root')]);
   }
   return rows;
 }
@@ -29,6 +34,7 @@ export async function browseKeyboard(nodePath, children, { backTo } = {}) {
 export function confirmDeleteKeyboard(handle, label) {
   return [
     [btn(`✅ Yes, delete ${label}`, `D:${handle}`), btn('❌ Cancel', 'c:0')],
+    [btn('🏠 Home', 'h:root')],
   ];
 }
 
@@ -51,7 +57,7 @@ export async function moveTargetKeyboard(entryH, entryId, nodePaths) {
   for (const p of top) {
     rows.push([btn(`📁 ${p}`, `mt:${entryH}:${entryId}:${await h8(p)}`)]);
   }
-  rows.push([btn('❌ Cancel', 'c:0')]);
+  rows.push([btn('❌ Cancel', 'c:0'), btn('🏠 Home', 'h:root')]);
   return rows;
 }
 
@@ -59,5 +65,7 @@ export function paginationKeyboard(handle, page, hasMore) {
   const row = [];
   if (page > 0) row.push(btn('◀️ Prev', `r:${handle}:${page - 1}`));
   if (hasMore) row.push(btn('Next ▶️', `r:${handle}:${page + 1}`));
-  return row.length ? [row] : [];
+  const rows = row.length ? [row] : [];
+  rows.push([btn('🗂 Browse this topic', `b:${handle}`), btn('🏠 Home', 'h:root')]);
+  return rows;
 }

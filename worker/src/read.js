@@ -52,7 +52,7 @@ export async function sendReadPage(env, chatId, nodePath, page, handle) {
   }
   const p = Math.min(Math.max(page, 0), data.chunks.length - 1);
   const chunk = data.chunks[p];
-  const kb = paginationKeyboard(handle, p, p < data.chunks.length - 1);
+  const kb = await paginationKeyboard(handle, p, p < data.chunks.length - 1);
   const label = data.chunks.length > 1 ? `\n\n— page ${p + 1}/${data.chunks.length} —` : '';
   await sendText(env, chatId, chunk.text + label, kb.length ? { keyboard: kb } : {});
   for (const url of chunk.images) {

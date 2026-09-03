@@ -1,5 +1,6 @@
-// callback_query routing: browse (b), read pages (r), export (x/X),
-// delete ask/confirm (d/D), cancel (c), and post-file actions (v/m/mt/n).
+// callback_query routing: app screens (home h, settings s, keys sk/ka/kr/kc
+// — fix-03), browse (b), read pages (r), export (x/X), delete ask/confirm
+// (d/D), cancel (c), and post-file actions (v/m/mt/n).
 // All deterministic — no Gemini.
 
 import { answerCb, sendText, editText } from './telegram.js';
@@ -8,6 +9,8 @@ import { resolveH8, getNodes } from './tree.js';
 import { readNode, deleteNodeTree, deleteEntry, moveEntry, createNode } from './notes.js';
 
 import { browseKeyboard, confirmDeleteKeyboard, moveTargetKeyboard } from './keyboards.js';
+import { HOME_TEXT, homeKeyboard, exportMenuKeyboard, settingsKeyboard, keysScreen, addKeysPrompt } from './ui.js';
+import { removeKeyAt, clearKeys, maskKey } from './keypool.js';
 import { sendReadPage } from './read.js';
 import { doExport } from './export.js';
 import { tokenFooter } from './pending.js';
@@ -30,6 +33,59 @@ export async function routeCallbackQuery(query, env) {
   const [op, a1, a2, a3] = data.split(':');
 
   switch (op) {
+    // ---- app screens (fix-03) -------------------------------------------
+    case 'h': { // home screen
+      await answerCb(env, query.id);
+      await editText(env, chatId, messageId, HOME_TEXT, { keyboard: homeKeyboard() });
+      break;
+    }
+    case 's': { // settings menu
+      await answerCb(env, query.id);
+      await editText(env, chatId, messageId,
+        '⚙️ Settings\n\nPick a section:', { keyboard: settingsKeyboard() });
+      break;
+    }
+    case 'sk': { // settings -> Gemini keys
+      await answerCb(env, query.id);
+      const screen = await keysScreen(env);
+      await editText(env, chatId, messageId, screen.text, { keyboard: screen.keyboard });
+      break;
+    }
+    case 'ka': { // add keys -> ForceReply prompt
+      await answerCb(env, query.id);
+      const prompt = addKeysPrompt();
+      await sendText(env, chatId, prompt.text, prompt.opts);
+      break;
+    }
+    case 'kr': { // remove key by index (tap only — never retype a key)
+      const idx = parseInt(a1 || '-1', 10);
+      const removed = await removeKeyAt(env, idx);
+      await answerCb(env, query.id, removed ? `Removed ${maskKey(removed)}` : 'Key not found');
+      const screen = await keysScreen(env);
+      const note = removed ? `🗑 Removed key ${maskKey(removed)}.\n\n` : '';
+      await editText(env, chatId, messageId, note + screen.text, { keyboard: screen.keyboard });
+      break;
+    }
+    case 'kc': { // clear all keys (two taps: ask -> confirm)
+      if (a1 === 'confirm') {
+        const n = await clearKeys(env);
+        await answerCb(env, query.id, `Cleared ${n} key${n === 1 ? '' : 's'}`);
+        const screen = await keysScreen(env);
+        await editText(env, chatId, messageId,
+          `🧹 Cleared all ${n} key${n === 1 ? '' : 's'}.\n\n` + screen.text,
+          { keyboard: screen.keyboard });
+      } else {
+        await answerCb(env, query.id);
+        await editText(env, chatId, messageId,
+          '⚠️ Remove ALL Gemini API keys? Voice notes, auto-filing and edits will stop working until you add one.',
+          { keyboard: [
+              [{ text: '✅ Yes, clear all', callback_data: 'kc:confirm' },
+               { text: '◀️ Back', callback_data: 'sk:root' }],
+              [{ text: '🏠 Home', callback_data: 'h:root' }],
+            ] });
+      }
+      break;
+    }
     case 'b': { // browse node
       const path = await resolveH8(env, a1);
       if (path === null) { await answerCb(env, query.id, 'Not found'); break; }
@@ -44,7 +100,14 @@ export async function routeCallbackQuery(query, env) {
       await sendReadPage(env, chatId, path, parseInt(a2 || '0', 10), a1);
       break;
     }
-    case 'x': { // export node
+    case 'x': { // export node — or the Export chooser from Home (x:menu)
+      if (a1 === 'menu') {
+        await answerCb(env, query.id);
+        await editText(env, chatId, messageId,
+          '📄 Export — what should I render as PDF?',
+          { keyboard: exportMenuKeyboard() });
+        break;
+      }
       const path = await resolveH8(env, a1);
       await answerCb(env, query.id);
       if (path === null) { await sendText(env, chatId, 'Not found.'); break; }

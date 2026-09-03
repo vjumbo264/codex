@@ -9,29 +9,25 @@ import { sendReadPage } from './read.js';
 import { doExport } from './export.js';
 import { tokenFooter } from './pending.js';
 
-const HELP = `📓 *Codex* — your notebook, right here in Telegram.
+const HELP = `📓 Codex — your notebook, run entirely by tapping.
 
-Capture
-• Just send text, a voice note, or a photo — I'll file it (via Gemini when set up).
-• /new <topic> — create a topic (use a/b for nesting)
-• /add <topic> — add a note to an exact topic (I'll ask for the text)
+The main way in: /menu (or /start) opens the home screen. From there everything — browsing, reading, exporting, deleting, and Settings (including Gemini API keys) — works with buttons alone. Every screen has Back and Home.
 
-Browse & read
-• /topics — browse the tree with buttons (drill in, read, export, delete)
-• /read <topic> — read a topic in chat, photos included
+Capture (just send it, no menu needed)
+• Text, a voice note, a photo, or a text file (.txt/.md/…) — I'll file it into your topic tree. A caption steers where it goes.
+• add this to <topic>: <text> — file exactly there.
+• new topic <name>: <text> — create the topic and file it.
 
-Export
-• /export <topic> — PDF of that topic + everything under it
-• /export all — the whole notebook as one PDF
+Fast-path commands (optional — the menu does all of this too)
+• /menu — the home screen
+• /topics — jump straight into browsing
+• /new <topic> — create a topic (slashes nest: /new travel/japan)
+• /add <topic> — add a note to an exact topic
+• /read <topic> — read a topic in chat
+• /export <topic> | /export all — PDF export
+• /delete <topic> [entry-id] — delete (always asks first)
 
-Edit & delete
-• /delete <topic> — delete a topic and all inside it (asks first)
-• /delete <topic> <entry-id> — delete one entry (asks first)
-• To edit, just ask in plain language, e.g. "edit the note about visas in travel"
-
-Tips
-• Tap a topic's Read button to page through it.
-• After I auto-file something, you get View / Move / New topic buttons.`;
+Plain language also works: "edit my note about the visa", "export recipes as a PDF", "what topics do I have?"`;
 
 export async function handleCommand(env, message) {
   const chatId = message.chat.id;
@@ -43,8 +39,11 @@ export async function handleCommand(env, message) {
 
   switch (cmd) {
     case 'start':
-      await sendText(env, chatId, `👋 Welcome to Codex — your Telegram notebook.\n\n${HELP}`);
+    case 'menu': {
+      const { HOME_TEXT, homeKeyboard } = await import('./ui.js');
+      await sendText(env, chatId, HOME_TEXT, { keyboard: homeKeyboard() });
       return true;
+    }
 
     case 'help':
       await sendText(env, chatId, HELP);

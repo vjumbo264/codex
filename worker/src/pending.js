@@ -6,7 +6,8 @@
 // When the operator replies, message.reply_to_message.text contains that
 // footer, so the Worker recovers full context with zero server state.
 
-const TOKEN_RE = /#cx:([a-z]+):([0-9a-f]+|root)(?::([0-9A-Za-z-]+))?\s*$/;
+// Flow names may contain '-' (e.g. none yet, but keep it future-proof).
+const TOKEN_RE = /#cx:([a-z][a-z-]*):([0-9a-f]+|root)(?::([0-9A-Za-z-]+))?\s*$/;
 
 export function tokenFooter(flow, handle, extra) {
   return `#cx:${flow}:${handle}${extra ? ':' + extra : ''}`;
