@@ -3,7 +3,7 @@
   "repo": "https://github.com/vjumbo264/codex",
   "round": "persistent-session-fix-v2",
   "fixes_complete": false,
-  "current_fix": "fix-04",
+  "current_fix": "verify",
   "last_updated_utc": "2026-09-03",
   "session_history": [
     {
@@ -30,6 +30,11 @@
       "session": 2,
       "date_utc": "2026-09-03",
       "summary": "fix-03 complete: tappable home interface (home/export/settings/keys screens, one visual pattern, Back+Home everywhere, /start & /menu, interface-first /help, command-menu sync) + KV-backed Gemini key pool with legacy-secret auto-migration. Commits a0d5e99, 2952200."
+    },
+    {
+      "session": 2,
+      "date_utc": "2026-09-03",
+      "summary": "fix-04 complete: gemini-flash-lite-latest everywhere + multi-key rotation (sticky last-successful key, key-specific failure matching, same-key 5xx retry, specific all-keys-failed feedback). Commit e9cac4f. 10-scenario mocked rotation suite passes. Next: whole-round VERIFY."
     }
   ],
   "fixes": [
@@ -96,12 +101,21 @@
     {
       "id": "fix-04",
       "name": "Switch to gemini-flash-lite-latest + multi-key rotation with sticky last-successful key",
-      "status": "pending",
-      "notes": "Change GEMINI_MODEL default to gemini-flash-lite-latest in wrangler.toml AND in gemini.js fallback string. Rewrite gemini() to iterate the key pool (from KV via fix-03), starting from the last-successful key index (stored in KV under key 'gemini:last_ok_idx'). Only rotate on key-specific failures: HTTP 429 (RESOURCE_EXHAUSTED), 403 (PERMISSION_DENIED/API_KEY_INVALID), 400 with API_KEY_INVALID in body. Do NOT rotate on 500/503 \u2014 retry once on same key then bubble. On success, persist new index. If every key exhausted for this request, surface a specific failure message via the fix-01 feedback style.",
-      "files": [],
-      "commits": [],
-      "tested": "",
-      "concerns": ""
+      "status": "done",
+      "notes": "COMPLETE (e9cac4f). gemini.js call layer rewritten: pool via keypool.getKeys (KV, legacy secret auto-migrated), requests start from persisted 'gemini:last_ok_idx' and persist the new index on success. Rotation triggers match Gemini's actual key-specific failures only: 429 (per-key rate/quota), 403 with PERMISSION_DENIED/quota body, 400 with API_KEY_INVALID/'API key not valid', 401. 5xx = one same-key retry then bubble (no rotation); other 4xx fail immediately (no pool burn). All-keys-exhausted raises allKeysFailed -> operator-facing message points at /menu -> Settings -> Keys, wired into the three user-visible failure paths (routeFreeText dispatch, photo filing, voice transcription in media.js). Model default 'gemini-flash-lite-latest' in both gemini.js fallback and wrangler.toml (step A). media.js voice key-gate now checks the KV pool instead of the legacy secret directly.",
+      "files": [
+        "worker/src/gemini.js",
+        "worker/src/media.js",
+        "worker/src/keypool.js",
+        "worker/wrangler.toml",
+        "ARCHITECTURE.md"
+      ],
+      "commits": [
+        "e9cac4f",
+        "a0d5e99"
+      ],
+      "tested": "Mocked-Gemini-API test suite (10 scenarios) ALL PASS: model alias on the wire; no-rotation fast path; 429 rotation + last_ok persisted; next request starts at working key (1 call); 400-invalid + 403-denied rotation; 503 same-key retry x1 then bubble without rotation; non-key 400 no rotation; all-keys-failed specific message; empty pool error; legacy-secret one-key fallback without KV. node --check passes on all touched files.",
+      "concerns": "none"
     }
   ]
 }
