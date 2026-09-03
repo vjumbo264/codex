@@ -3,7 +3,7 @@
   "repo": "https://github.com/vjumbo264/codex",
   "round": "persistent-session-fix-v2",
   "fixes_complete": false,
-  "current_fix": "fix-03",
+  "current_fix": "fix-04",
   "last_updated_utc": "2026-09-03",
   "session_history": [
     {
@@ -25,6 +25,11 @@
       "session": 2,
       "date_utc": "2026-09-03",
       "summary": "fix-03 step A: KV key pool module (keypool.js) with legacy-secret auto-migration, wrangler KV binding, idempotent KV auto-provisioning in deploy workflow (scripts/predeploy.mjs), Telegram command-menu self-sync, model var switched to gemini-flash-lite-latest. Step B (tappable home/settings/keys UI) next."
+    },
+    {
+      "session": 2,
+      "date_utc": "2026-09-03",
+      "summary": "fix-03 complete: tappable home interface (home/export/settings/keys screens, one visual pattern, Back+Home everywhere, /start & /menu, interface-first /help, command-menu sync) + KV-backed Gemini key pool with legacy-secret auto-migration. Commits a0d5e99, 2952200."
     }
   ],
   "fixes": [
@@ -62,19 +67,31 @@
     {
       "id": "fix-03",
       "name": "Telegram-native home interface + Settings/Keys sub-interface, KV-backed key pool",
-      "status": "in_progress",
-      "notes": "STEP A DONE (pushed): KV key-pool module + provisioning + command-menu sync. (1) worker/src/keypool.js: CODEX_KV-backed key pool \u2014 getKeys/addKeys/removeKeyAt/clearKeys/maskKey, last-successful index stored under 'gemini:last_ok_idx', and automatic migration: an empty pool + legacy GEMINI_API_KEY secret -> secret promoted into KV as key #1 (zero manual re-add; without KV it still falls back to the secret). (2) wrangler.toml: [[kv_namespaces]] binding CODEX_KV with placeholder id; GEMINI_MODEL now gemini-flash-lite-latest (fix-04 model switch folded in here). (3) scripts/predeploy.mjs + deploy.yml: idempotent Cloudflare-API step that creates the CODEX_KV namespace when missing and stamps the real id into wrangler.toml before wrangler deploy \u2014 uses the existing CLOUDFLARE_API_TOKEN/ACCOUNT_ID GH secrets, no dashboard access ever. (4) telegram.js syncCommandMenu: setMyCommands (/start /menu /topics /new /add /read /export /delete /help), throttled to once per UTC day via KV flag; index.js calls it on each update. STEP B REMAINING (next): the tappable UI itself \u2014 home/settings/keys screens in a new ui.js, opcodes (h/s/sk/ka/kr/kc) wired into callbacks.js, back/home navigation on browse/read/export/delete/move screens, 'keys' ForceReply flow in pending.js+router.js, /start and /menu -> home screen, rewrite HELP to interface-first, update ARCHITECTURE.md \u00a72/\u00a73 and README. Validated so far: node --check on keypool.js, telegram.js, index.js, predeploy.mjs \u2014 all pass.",
+      "status": "done",
+      "notes": "COMPLETE. Step A (a0d5e99): keypool.js (CODEX_KV pool, masked listing, last_ok idx, one-time legacy GEMINI_API_KEY migration via 'gemini:migrated' flag so Clear-All can't be undone by re-seeding), wrangler.toml KV binding, scripts/predeploy.mjs + deploy.yml (idempotent CF-API namespace creation + id stamping, existing GH secrets, zero dashboard), syncCommandMenu (setMyCommands, once/day via KV flag). Step B (2952200): ui.js \u2014 home screen (Browse/Export/Settings), export chooser, settings menu, keys screen (masked last-4 list, per-key Remove buttons, Clear-All two-tap confirm), newline-separated ForceReply key-add prompt ('keys' flow in pending.js + router.js, with cancel/validation/summary). callbacks.js routes h/s/sk/ka/kr/kc + x:menu. keyboards.js: every screen ends with a Home button (browse Up+Home, delete-confirm Home, move-picker Cancel+Home, pagination Browse-this-topic+Home); read.js awaits the now-async paginationKeyboard. /start & /menu open home; HELP rewritten interface-first; ARCHITECTURE.md \u00a72/\u00a73/\u00a74.3 and README updated. Smoke test caught and fixed a real bug: clear-all previously re-seeded the legacy secret on next read.",
       "files": [
         "worker/src/keypool.js",
+        "worker/src/ui.js",
+        "worker/src/callbacks.js",
+        "worker/src/keyboards.js",
+        "worker/src/commands.js",
+        "worker/src/router.js",
+        "worker/src/pending.js",
+        "worker/src/read.js",
+        "worker/src/telegram.js",
+        "worker/src/index.js",
         "worker/wrangler.toml",
         "scripts/predeploy.mjs",
         ".github/workflows/deploy.yml",
-        "worker/src/telegram.js",
-        "worker/src/index.js"
+        "ARCHITECTURE.md",
+        "README.md"
       ],
-      "commits": [],
-      "tested": "node --check on all edited/new JS files passed. Deploy-time KV provisioning untested until this push's workflow run.",
-      "concerns": "KV namespace auto-provisioning must not require operator dashboard access. Chosen: GH Actions predeploy step. Also update ARCHITECTURE.md \u00a73 to describe CODEX_KV and the key pool model."
+      "commits": [
+        "a0d5e99",
+        "2952200"
+      ],
+      "tested": "node --check on all touched files; local smoke test (in-memory KV) covering legacy-secret migration + persistence, multi-line add with dedupe/validation, masking, remove-by-index, clear-all + no re-seed, last_ok roundtrip, screen structure (Add/Remove/Back/Home buttons), ForceReply token roundtrip, and no full-key leakage \u2014 ALL PASS. Live Telegram verification deferred to the whole-round VERIFY pass.",
+      "concerns": "First deploy with the new binding runs predeploy.mjs: it creates CODEX_KV via the CF API and rewrites wrangler.toml's placeholder id inside the runner before wrangler deploys. Worth watching the Actions log of the push that follows to confirm the binding attached."
     },
     {
       "id": "fix-04",
