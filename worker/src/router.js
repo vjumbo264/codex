@@ -19,6 +19,11 @@ export async function routeMessage(message, env) {
   if (!chatId) return;
   const text = (message.text || message.caption || '').trim();
 
+  console.log('DIAG route:', JSON.stringify({
+    has_text: !!message.text, len: (message.text||'').length,
+    has_reply: !!message.reply_to_message,
+    reply_text_tail: message.reply_to_message && (message.reply_to_message.text||'').slice(-60),
+  }));
   // 1) Pending ForceReply flows (deterministic)
   const pending = parsePending(message);
   if (pending) {
@@ -57,7 +62,9 @@ async function handlePendingFlow(env, message, pending) {
   const { flow, handle, extra } = pending;
 
   if (flow === 'add') {
+    console.log('DIAG pending add: handle=' + handle);
     const path = await resolveH8(env, handle);
+    console.log('DIAG pending add: resolved path=' + path);
     if (path === null) { await sendText(env, chatId, 'That topic no longer exists.'); return true; }
     if (message.text && /^(cancel|stop|abort|never ?mind)$/i.test(message.text.trim())) {
       await sendText(env, chatId, 'Cancelled.');
