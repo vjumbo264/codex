@@ -18,32 +18,123 @@ import { filedActionsKeyboard, confirmDeleteKeyboard } from './keyboards.js';
 import { sendReadPage } from './read.js';
 import { doExport } from './export.js';
 import { b64encodeBytes } from './util.js';
+import { getKeys, getLastOkIndex, setLastOkIndex, maskKey } from './keypool.js';
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
-function requireKey(env) {
-  return !!env.GEMINI_API_KEY;
+// fix-04: key pool presence check (the legacy GEMINI_API_KEY secret is
+// auto-migrated into the pool on first read by keypool.getKeys).
+async function requireKey(env) {
+  const keys = await getKeys(env);
+  return keys.length > 0;
 }
 
-async function gemini(env, payload) {
-  const model = env.GEMINI_MODEL || 'gemini-2.5-flash';
+// Is this failure specific to the KEY (rotate) rather than the request or
+// the service (don't rotate)? Matches Gemini's actual error shapes:
+//   429 (RESOURCE_EXHAUSTED / quota)     -> key's quota/rate exhausted
+//   403 (PERMISSION_DENIED / key forbidden) -> key unusable
+//   400/403 (API_KEY_INVALID / API key not valid) -> dead key
+//   401 -> key auth failure
+// Deliberately NOT matched: 500/503 (service-side), 400 INVALID_ARGUMENT
+// for malformed requests (rotating would burn every key pointlessly).
+function isKeyFailure(status, bodyText) {
+  const t = String(bodyText || '');
+  const quotaish = /RESOURCE_EXHAUSTED|QUOTA_EXCEEDED|quota/i.test(t);
+  const keyInvalid = /API_KEY_INVALID|API key not valid|PERMISSION_DENIED|key.*(?:invalid|expired|revoked|forbidden)/i.test(t);
+  if (status === 429) return true; // Gemini 429s are per-key rate/quota
+  if (status === 403) return keyInvalid || quotaish;
+  if (status === 400) return keyInvalid;
+  if (status === 401) return true;
+  return false;
+}
+
+// Single attempt with one key. Throws a tagged error
+// { keyFailure: bool, status, body } on failure.
+async function geminiOnce(env, model, key, payload) {
   const res = await fetch(`${BASE}/models/${model}:generateContent`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-goog-api-key': env.GEMINI_API_KEY,
+      'x-goog-api-key': key,
     },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`Gemini ${res.status}: ${t.slice(0, 300)}`);
+    const err = new Error(`Gemini ${res.status}: ${t.slice(0, 300)}`);
+    err.status = res.status;
+    err.body = t;
+    err.keyFailure = isKeyFailure(res.status, t);
+    throw err;
   }
   const data = await res.json();
   const parts = data.candidates && data.candidates[0] && data.candidates[0].content &&
     data.candidates[0].content.parts;
-  if (!parts) throw new Error('Gemini: no content');
+  if (!parts) {
+    const err = new Error('Gemini: no content');
+    err.keyFailure = false;
+    throw err;
+  }
   return parts.map(p => p.text || '').join('');
+}
+
+// fix-04: multi-key rotation, cheapest-first model, sticky last-success.
+// Starts from the last key that worked (KV 'gemini:last_ok_idx') instead of
+// re-discovering dead keys on every request. Rotates ONLY on key-specific
+// failures; service errors (5xx) get one same-key retry, then bubble.
+async function gemini(env, payload) {
+  const model = env.GEMINI_MODEL || 'gemini-flash-lite-latest';
+  const keys = await getKeys(env);
+  if (!keys.length) {
+    const err = new Error('no gemini keys configured');
+    err.noKeys = true;
+    throw err;
+  }
+  let start = await getLastOkIndex(env);
+  if (start >= keys.length) start = 0;
+
+  let lastErr = null;
+  for (let step = 0; step < keys.length; step++) {
+    const idx = (start + step) % keys.length;
+    const key = keys[idx];
+    try {
+      const out = await geminiOnce(env, model, key, payload);
+      if (idx !== start) await setLastOkIndex(env, idx);
+      return out;
+    } catch (e) {
+      lastErr = e;
+      if (e.keyFailure) {
+        console.error(`gemini key ${idx} (${maskKey(key)}) failed as key-specific: ${e.status}`);
+        continue; // try the next key in the pool
+      }
+      if (e.status && e.status >= 500) {
+        // Service-side blip: retry once on the SAME key, then bubble.
+        try {
+          const out = await geminiOnce(env, model, key, payload);
+          if (idx !== start) await setLastOkIndex(env, idx);
+          return out;
+        } catch (e2) {
+          if (e2.keyFailure) { lastErr = e2; continue; }
+          throw e2;
+        }
+      }
+      throw e; // non-key, non-5xx failure (e.g. bad request): do not rotate
+    }
+  }
+  const err = new Error(
+    `all ${keys.length} Gemini key(s) failed for this request (last: ${lastErr ? lastErr.message : 'unknown'})`);
+  err.allKeysFailed = true;
+  err.cause = lastErr;
+  throw err;
+}
+
+// fix-01-style specific failure feedback when the whole key pool is spent.
+export function allFailedMessage(e) {
+  if (e && e.allKeysFailed) {
+    return '❌ Every configured Gemini API key failed for this request (quota exhausted or keys invalid). ' +
+      'Add a fresh key via /menu → ⚙️ Settings → 🔑 Gemini API keys, then try again.';
+  }
+  return null;
 }
 
 function parseJsonLoose(text) {
@@ -167,14 +258,14 @@ export async function routeFreeText(env, message, text, opts = {}) {
   }
 
   // Everything else requires reasoning.
-  if (!requireKey(env)) {
+  if (!(await requireKey(env))) {
     if (opts.photo) {
       await sendText(env, chatId,
-        '📷 I can save this photo, but I need the Gemini API key to decide where it goes. Add GEMINI_API_KEY (see README), or use /add <topic> then send the photo.');
+        '📷 I can save this photo, but I need a Gemini API key to decide where it goes. Add one via /menu → ⚙️ Settings → 🔑 Gemini API keys, or use /add <topic> then send the photo.');
       return;
     }
     await sendText(env, chatId,
-      'I need the Gemini API key to file free-form notes. Add GEMINI_API_KEY (see README), or use a command: /new, /add, /topics, /read, /export, /delete.');
+      'I need a Gemini API key to file free-form notes. Add one via /menu → ⚙️ Settings → 🔑 Gemini API keys, or use a command: /new, /add, /topics, /read, /export, /delete.');
     return;
   }
 
@@ -185,7 +276,8 @@ export async function routeFreeText(env, message, text, opts = {}) {
       await autoFilePhoto(env, message, text, status.message_id);
     } catch (e) {
       console.error(e);
-      await editText(env, chatId, status.message_id, '❌ Could not file the photo. Try /add <topic>.');
+      await editText(env, chatId, status.message_id,
+        allFailedMessage(e) || '❌ Could not file the photo. Try /add <topic>.');
     }
     return;
   }
@@ -198,7 +290,7 @@ export async function routeFreeText(env, message, text, opts = {}) {
   } catch (e) {
     console.error('gemini dispatch failed', e);
     await editText(env, chatId, status.message_id,
-      '❌ I could not handle that. Try a command from /help.');
+      allFailedMessage(e) || '❌ I could not handle that. Try a command from /help.');
   }
 }
 

@@ -192,9 +192,10 @@ export async function handlePhotoMessage(env, message, explicitPath) {
 // Voice note ingestion: transcribe + clean via Gemini, then file.
 export async function handleVoiceMessage(env, message, explicitPath = null) {
   const chatId = message.chat.id;
-  if (!env.GEMINI_API_KEY) {
+  const { getKeys } = await import('./keypool.js');
+  if (!(await getKeys(env)).length) {
     await sendText(env, chatId,
-      '🎙 Voice notes need the Gemini API key for transcription. Add it as the Worker secret GEMINI_API_KEY (see README), or send text instead.');
+      '🎙 Voice notes need a Gemini API key for transcription. Add one via /menu → ⚙️ Settings → 🔑 Gemini API keys, or send text instead.');
     return;
   }
   const status = await sendText(env, chatId, '⏳ Transcribing…');
@@ -223,6 +224,8 @@ export async function handleVoiceMessage(env, message, explicitPath = null) {
   } catch (e) {
     console.error('voice ingest failed', e);
     const { editText } = await import('./telegram.js');
-    await editText(env, chatId, status.message_id, '❌ Transcription failed. Try again or send text.');
+    const { allFailedMessage } = await import('./gemini.js');
+    await editText(env, chatId, status.message_id,
+      allFailedMessage(e) || '❌ Transcription failed. Try again or send text.');
   }
 }

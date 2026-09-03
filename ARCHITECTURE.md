@@ -288,6 +288,23 @@ function then executes. Gemini never re-reads, re-renders or re-processes
 stored content outside cases 1–4. Manual paths contain **no Gemini code at
 all** — the import graph keeps `gemini.js` out of the command path.
 
+### 5.1 Model & key rotation (fix-04)
+
+- **Model:** `gemini-flash-lite-latest` (the cheapest current model) for
+  every call, text and audio. Configurable via the `GEMINI_MODEL` var.
+- **Key pool:** every call runs against the KV key pool (§3), starting
+  from the last-successful key index (`gemini:last_ok_idx`) so the bot
+  settles onto a working key instead of re-discovering dead ones on every
+  request. On success the new index is persisted.
+- **Rotation triggers (key-specific only):** HTTP 429 (quota/rate
+  exhaustion), 403 with `PERMISSION_DENIED`/quota in the body, 400 with
+  `API_KEY_INVALID`/`API key not valid`, 401. The same request is retried
+  verbatim with the next key, walking the whole pool in order.
+- **Non-triggers:** 5xx responses are service-side — retried once on the
+  SAME key, then surfaced; other 4xx (e.g. malformed request) fail
+  immediately without burning the pool. Only when EVERY key fails does the
+  operator see a specific failure message pointing at Settings → Keys.
+
 ---
 
 ## 6. PDF rendering
