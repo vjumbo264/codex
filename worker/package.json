@@ -1,0 +1,16 @@
+{
+  "name": "codex-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

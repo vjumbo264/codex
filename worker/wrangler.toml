@@ -1,0 +1,20 @@
+name = "codex-bot"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Bundles the PDF fonts into the Worker as raw ArrayBuffers.
+rules = [
+  { type = "Data", globs = ["fonts/*.ttf"] }
+]
+
+[vars]
+REPO_OWNER = "vjumbo264"
+REPO_NAME = "codex"
+REPO_BRANCH = "main"
+GEMINI_MODEL = "gemini-2.5-flash"
+
+# Secrets (set via Cloudflare dashboard/API — never in this file):
+#   TELEGRAM_BOT_TOKEN  - Bot API token
+#   GITHUB_REPO_TOKEN   - fine-grained PAT, contents read/write on vjumbo264/codex
+#   WEBHOOK_SECRET      - random token; Telegram sends it as X-Telegram-Bot-Api-Secret-Token
+#   GEMINI_API_KEY      - added by the operator after build (see README)
