@@ -2,13 +2,18 @@
   "project": "codex",
   "repo": "https://github.com/vjumbo264/codex",
   "build_complete": false,
-  "current_task": "task-04",
+  "current_task": "task-05",
   "last_updated_utc": "2026-09-03",
   "session_history": [
     {
       "session": 1,
       "date_utc": "2026-09-03",
       "summary": "Initialized repository vjumbo264/codex (public) via GitHub API. Seeded BUILD_STATE.json with full task list. Repo URL: https://github.com/vjumbo264/codex"
+    },
+    {
+      "session": 1,
+      "date_utc": "2026-09-03",
+      "summary": "task-04 complete: GitHub-as-database layer implemented and verified live (create node -> append entry -> read back -> tree listing -> delete round-trip all passed against the real repo)."
     }
   ],
   "tasks": [
@@ -60,12 +65,21 @@
     {
       "id": "task-04",
       "name": "Implement GitHub-as-database access from the Worker",
-      "status": "pending",
-      "notes": "Read/write/delete repo files via GitHub REST API from Worker. Credential: fine-grained GitHub token stored as Worker secret named GITHUB_REPO_TOKEN (never hardcoded). Note: repo is PUBLIC, so content is world-readable; GITHUB_REPO_TOKEN used only for writes.",
-      "files": [],
+      "status": "done",
+      "notes": "github.js = Contents API getFile/putFile/putBinaryFile/deleteFile + recursive git/trees listing with 20s isolate cache (invalidated on every write) + rawUrl helper (public repo -> no creds for raw bytes). tree.js = node model over the tree (listNodePaths, getNodes w/ children, resolveH8 via sha1(path)[:8] with 12-char widening on collision, findByName, resolvePath, uniqueChildSlug, filesUnderNode). notes.js = parseIndex/serializeIndex round-trip on the ARCHITECTURE.md grammar, createNode/ensureNode/appendEntry/updateEntry/deleteEntry/deleteNodeTree/storeImage/moveEntry (image refs rewritten + assets copied). Credential: fine-grained PAT in Worker secret GITHUB_REPO_TOKEN, used only for writes. VALIDATED: node syntax-check x10; node-side round-trip test (serialize->parse->append->reparse) all true; LIVE round-trip against real repo passed end-to-end.",
+      "files": [
+        "worker/src/util.js",
+        "worker/src/github.js",
+        "worker/src/telegram.js",
+        "worker/src/tree.js",
+        "worker/src/notes.js",
+        "worker/src/pending.js",
+        "worker/src/keyboards.js",
+        "worker/src/pdf.js"
+      ],
       "commits": [],
-      "tested": "",
-      "concerns": "Repo visibility is public per prompt; notes content will be publicly readable on GitHub. Recorded as an assumption: operator accepted public visibility per the build contract."
+      "tested": "node --check all modules OK; pure-logic round-trip test OK; live create/append/read/list/delete round-trip against vjumbo264/codex OK (test node zz-dbcheck created and fully removed).",
+      "concerns": "none"
     },
     {
       "id": "task-05",
