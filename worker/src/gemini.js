@@ -200,12 +200,23 @@ export async function transcribeAndClean(env, audioBytes, tgPath) {
 
 async function treeListing(env) {
   const paths = await listNodePaths(env);
-  const withTitle = [];
+  const lines = [];
   for (const p of paths) {
     if (!p) continue;
-    withTitle.push(p.split('/').join(' > '));
+    let suffix = '';
+    try {
+      const node = await readNode(env, p);
+      if (node) {
+        suffix = `  [${node.entries.length} ${node.entries.length === 1 ? 'entry' : 'entries'}]`;
+        const prev = node.entries.slice(-3)
+          .map(e => `    - (${e.date}, id ...${e.id.slice(-4)}) ${e.body.replace(/!\[[^\]]*\]\(assets\/[^)]+\)/g, '[photo]').replace(/\n+/g, ' ').slice(0, 80)}`)
+          .filter(Boolean);
+        if (prev.length) suffix += '\n' + prev.join('\n');
+      }
+    } catch { suffix = ''; }
+    lines.push(p.split('/').join(' > ') + suffix);
   }
-  return withTitle.length ? withTitle.join('\n') : '(no topics yet)';
+  return lines.length ? lines.join('\n') : '(no topics yet)';
 }
 
 // ---- case 2: auto-filing --------------------------------------------------
@@ -348,7 +359,10 @@ Classify the user's message into ONE action and reply with ONLY strict JSON. Act
 - {"action":"edit","path":"<topic>","entry_hint":"<which entry>","instruction":"<how to change it>"} -> edit an entry
 - {"action":"browse"}                                                  -> show/browse topics
 - {"action":"help"}                                                    -> how to use
-Use the tree paths exactly as listed (with > separators). If a referenced topic is not in the tree, still give your best-guess path string.
+Use the tree paths exactly as listed (with > separators). Each line shows a path, its entry count, and previews of its latest entries. CRITICAL targeting rules:
+- When the user references an entry by content or loosely (e.g. "that morning note", "my note about X"), resolve "path" to the DEEPEST node whose entries actually match the description — a note described as "the morning note" that lives under morning > random belongs to path "morning > random", NOT "morning".
+- Prefer a node that actually contains a matching entry over an empty parent with a similar name.
+- If a referenced topic is not in the tree, still give your best-guess path string.
 
 USER MESSAGE:
 ${text}` }],
@@ -362,21 +376,21 @@ ${text}` }],
       await autoFileNote(env, chatId, intent.text || text, statusMessageId);
       return;
     case 'read': {
-      const path = await resolvePath(env, intent.path || '', true);
+      const path = await resolvePath(env, String(intent.path || '').replace(/\s*>\s*/g, '/'), true);
       if (path === null) { await editText(env, chatId, statusMessageId, `Topic not found: ${intent.path}`); return; }
       await editText(env, chatId, statusMessageId, '📖 Here it is:');
       await sendReadPage(env, chatId, path, 0, await h8(path));
       return;
     }
     case 'export': {
-      const path = /^all$/i.test(intent.path || '') ? '' : await resolvePath(env, intent.path || '', true);
+      const path = /^all$/i.test(intent.path || '') ? '' : await resolvePath(env, String(intent.path || '').replace(/\s*>\s*/g, '/'), true);
       if (path === null) { await editText(env, chatId, statusMessageId, `Topic not found: ${intent.path}`); return; }
       await editText(env, chatId, statusMessageId, '⏳ Rendering PDF…');
       await doExport(env, chatId, path, statusMessageId);
       return;
     }
     case 'delete_topic': {
-      const path = await resolvePath(env, intent.path || '', true);
+      const path = await resolvePath(env, String(intent.path || '').replace(/\s*>\s*/g, '/'), true);
       if (path === null) { await editText(env, chatId, statusMessageId, `Topic not found: ${intent.path}`); return; }
       const breadcrumb = path.split('/').join(' › ');
       await editText(env, chatId, statusMessageId,
@@ -410,10 +424,58 @@ ${text}` }],
 // Entry-targeted actions: resolve which entry Gemini means (case 4), then
 // either confirm-delete it or rewrite it (case 3).
 async function handleEntryAction(env, chatId, statusMessageId, intent, mode) {
-  const path = await resolvePath(env, intent.path || '', true);
-  if (path === null) { await editText(env, chatId, statusMessageId, `Topic not found: ${intent.path}`); return; }
-  const node = await readNode(env, path);
-  if (!node || !node.entries.length) {
+  let path = await resolvePath(env, String(intent.path || '').replace(/\s*>\s*/g, '/'), true);
+  let node = path !== null ? await readNode(env, path) : null;
+
+  // v5 fix-02: never report "not found"/"no entries" while a matching
+  // entry exists elsewhere in the tree. Order of fallback:
+  //   1. resolved node has no entries -> search its descendants;
+  //   2. path did not resolve at all -> search the WHOLE tree by content.
+  const hint = String(intent.entry_hint || '').toLowerCase();
+  const hintWords = hint.split(/[^a-z0-9]+/).filter(w => w.length > 3);
+
+  async function entriesWithScore(p) {
+    const n = await readNode(env, p);
+    if (!n) return { node: n, scored: [] };
+    const scored = n.entries.map(e => {
+      const hay = (e.body + ' ' + e.id).toLowerCase();
+      const score = hintWords.reduce((acc, w) => acc + (hay.includes(w) ? 1 : 0), 0);
+      return { e, score };
+    });
+    return { node: n, scored };
+  }
+
+  if (node && node.entries.length === 0) {
+    const nodes = await getNodes(env, true);
+    const rec = nodes.get(path);
+    const queue = [...(rec ? rec.children : [])];
+    let best = null;
+    while (queue.length) {
+      const p = queue.shift();
+      const { node: n, scored } = await entriesWithScore(p);
+      queue.push(...((nodes.get(p) || {}).children || []));
+      if (n && n.entries.length) {
+        const hit = scored.reduce((a, b) => (b.score > (a ? a.score : -1) ? b : a), null);
+        if (!best || (hit && hit.score > best.score)) best = { path: p, node: n, score: hit ? hit.score : 0 };
+      }
+    }
+    if (best) { path = best.path; node = best.node; }
+  } else if (!node) {
+    // whole-tree content search for the best-matching entry
+    const paths = await listNodePaths(env, true);
+    let best = null;
+    for (const p of paths) {
+      if (!p) continue;
+      const { node: n, scored } = await entriesWithScore(p);
+      if (!n || !n.entries.length) continue;
+      const hit = scored.reduce((a, b) => (b.score > (a ? a.score : -1) ? b : a), null);
+      if (hit && hit.score > 0 && (!best || hit.score > best.score)) best = { path: p, node: n, score: hit.score };
+    }
+    if (best) { path = best.path; node = best.node; }
+  }
+
+  if (!node) { await editText(env, chatId, statusMessageId, `Topic not found: ${intent.path}`); return; }
+  if (!node.entries.length) {
     await editText(env, chatId, statusMessageId, 'No entries found there.');
     return;
   }
@@ -427,8 +489,15 @@ ${listing}
 User described: ${intent.entry_hint || ''}` }] }],
     generationConfig: { temperature: 0.1, maxOutputTokens: 100 },
   });
-  const { id } = parseJsonLoose(raw);
-  const entry = node.entries.find(e => e.id === id);
+  let entry = null;
+  try { entry = node.entries.find(e => e.id === parseJsonLoose(raw).id) || null; } catch { entry = null; }
+  // v5 fix-02: if Gemini's pick misses, fall back to content scoring, then
+  // the most recent entry — never declare a real entry unidentifiable.
+  if (!entry && node.entries.length) {
+    const { scored } = await entriesWithScore(path);
+    const best = scored.reduce((a, b) => (b.score > (a ? a.score : -1) ? b : a), null);
+    entry = (best && best.score > 0) ? best.e : node.entries[node.entries.length - 1];
+  }
   if (!entry) { await editText(env, chatId, statusMessageId, 'Could not identify that entry.'); return; }
 
   if (mode === 'delete') {

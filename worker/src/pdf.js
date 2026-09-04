@@ -5,6 +5,7 @@
 // children recursively.
 
 import { PDFDocument, rgb } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 import fontRegular from '../fonts/DejaVuSans.ttf';
 import fontBold from '../fonts/DejaVuSans-Bold.ttf';
 import { readNode, parseIndex } from './notes.js';
@@ -156,6 +157,7 @@ async function renderNode(env, doc, w, nodePath, nodes) {
 // Export one node (with all descendants). nodePath '' = whole notebook.
 export async function exportPdf(env, nodePath) {
   const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit); // required for embedFont(custom TTF) — without it every export threw FontkitNotRegisteredError (fix-01 v5)
   const font = await doc.embedFont(fontRegular, { subset: true });
   const bold = await doc.embedFont(fontBold, { subset: true });
 
