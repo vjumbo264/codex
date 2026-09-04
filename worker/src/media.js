@@ -121,7 +121,6 @@ export async function handleDocumentMessage(env, message, explicitPath = null) {
   // will match and never invoke Gemini. Otherwise routeFreeText will run
   // one classification call, exactly as if the operator had typed the
   // file's contents.
-  await editText(env, chatId, status.message_id, '⏳ Filing…');
   const { routeFreeText } = await import('./gemini.js');
   // If the caption uses one of the explicit fast-paths, that pattern
   // expects "prefix TOPIC: content". Rebuild the string to match:
@@ -138,14 +137,20 @@ export async function handleDocumentMessage(env, message, explicitPath = null) {
     dispatchText = content;
   }
   // Fake a message-like object carrying just chat + text; routeFreeText
-  // only reads chat.id and dispatches. Reuse the existing status message
-  // by having routeFreeText edit it? routeFreeText currently always sends
-  // a fresh status message. To avoid two messages, delete the old status
-  // and let routeFreeText emit its own “Working on it…” / “Filing…” line.
+  // only reads chat.id and dispatches. fix-remove-placeholder: the
+  // "⏳ Reading file…" message above is edited into the result of the
+  // explicit fast-path when it matches (deterministic branch — reuses the
+  // status message in place). When the caption/body needs Gemini dispatch,
+  // routeFreeText no longer emits a placeholder at all: its next visible
+  // message is the real reply, so the stale "Reading file…" message is
+  // deleted to leave exactly one message for the turn (Compass shape).
   const { tg } = await import('./telegram.js');
-  await tg(env, 'deleteMessage', { chat_id: chatId, message_id: status.message_id });
   const pseudo = { chat: { id: chatId } };
-  await routeFreeText(env, pseudo, dispatchText);
+  const placeholderless = await routeFreeText(env, pseudo, dispatchText,
+    { statusMessageId: status.message_id });
+  if (!placeholderless) {
+    await tg(env, 'deleteMessage', { chat_id: chatId, message_id: status.message_id });
+  }
 }
 
 // Biggest photo variant = best quality.

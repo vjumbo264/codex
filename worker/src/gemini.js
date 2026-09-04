@@ -245,7 +245,8 @@ async function treeListing(env) {
 
 // Decide where a note belongs, file it, confirm with quick-action buttons.
 export async function autoFileNote(env, chatId, noteText, statusMessageId) {
-  const status = async (t) => { if (statusMessageId) await editText(env, chatId, statusMessageId, t); };
+  // fix-remove-placeholder: no interim status edits — the file decision and
+  // write happen immediately and the confirmation is the (single) reply.
   const tree = await treeListing(env);
   const raw = await gemini(env, {
     contents: [{
@@ -283,13 +284,14 @@ ${noteText}` }],
     const made = await createNode(env, '', 'Inbox');
     nodePath = made.path;
   }
-  await status('⏳ Filing…');
+  // fix-remove-placeholder: no '⏳ Filing…' interim edit — file immediately
+  // and deliver the confirmation as the (single) reply.
   const entryId = await appendEntry(env, nodePath, noteText);
   const node = await readNode(env, nodePath);
   const breadcrumb = nodePath.split('/').join(' › ');
   const created = !!decision.new;
   const title = node ? node.title : nodePath.split('/').pop();
-  await editText(env, chatId, statusMessageId,
+  await deliver(env, chatId, statusMessageId,
     created
       ? `✅ Created new topic "${title}" (${breadcrumb}) and filed the note there as entry ${entryId}.`
       : `✅ Filed note as entry ${entryId} under ${title} (${breadcrumb}).`,
@@ -334,51 +336,54 @@ export async function routeFreeText(env, message, text, opts = {}) {
     if (opts.photo) {
       await sendText(env, chatId,
         '📷 I can save this photo, but I need a Gemini API key to decide where it goes. Add one via /menu → ⚙️ Settings → 🔑 Gemini API keys, or use /add <topic> then send the photo.');
-      return;
+      return false;
     }
     await sendText(env, chatId,
       'I need a Gemini API key to file free-form notes. Add one via /menu → ⚙️ Settings → 🔑 Gemini API keys, or use a command: /new, /add, /topics, /read, /export, /delete.');
-    return;
+    return false;
   }
 
   // A photo with no explicit path -> auto-file it (image content + caption).
+  // No placeholder: the filed confirmation (or the failure) is the first
+  // message, exactly like the text path (Compass one-message shape).
   if (opts.photo) {
-    const status = await sendText(env, chatId, '⏳ Filing photo…');
     try {
-      await autoFilePhoto(env, message, text, status && status.message_id);
+      await autoFilePhoto(env, message, text, null);
     } catch (e) {
       console.error(e);
-      if (!(await replaceStatus(env, chatId, status && status.message_id,
-        allFailedMessage(e) || '❌ Could not file the photo. Try /add <topic>.'))) {
-        await sendText(env, chatId,
-          allFailedMessage(e) || '❌ Could not file the photo. Try /add <topic>.');
-      }
+      await sendText(env, chatId,
+        allFailedMessage(e) || '❌ Could not file the photo. Try /add <topic>.');
     }
-    return;
+    return false;
   }
 
   // Could be: a note to auto-file, an edit request, an explicit action asked
-  // in plain language, or an ambiguous target. One classification call:
-  const status = await sendText(env, chatId, '⏳ Working on it…');
+  // in plain language, or an ambiguous target. One classification call.
+  // NO "⏳ Working on it…" placeholder — the next visible message is the
+  // real reply (the Compass reference bot's exact behavior).
   try {
-    await classifyAndDispatch(env, chatId, text, status && status.message_id);
+    await classifyAndDispatch(env, chatId, text, null);
   } catch (e) {
     console.error('gemini dispatch failed', e);
-    if (!(await replaceStatus(env, chatId, status && status.message_id,
-      allFailedMessage(e) || '⚠️ The AI dispatcher hiccuped on that message. Try again in a moment, or use a command from /help.'))) {
-      await sendText(env, chatId,
-        allFailedMessage(e) || '⚠️ The AI dispatcher hiccuped on that message. Try again in a moment, or use a command from /help.');
-    }
+    await sendText(env, chatId,
+      allFailedMessage(e) || '⚠️ The AI dispatcher hiccuped on that message. Try again in a moment, or use a command from /help.');
   }
+  return false;
 }
 
-// fix-silent-nonresponse: never let an unanswered placeholder stand. A null
-// statusMessageId (placeholder send failed) or a null editText result (edit
-// failed, e.g. deleted placeholder) downgrades to a plain sendText so the
-// user ALWAYS gets a visible outcome. Returns true when the edit landed.
-async function replaceStatus(env, chatId, statusMessageId, text, opts = {}) {
-  if (!statusMessageId) return false;
-  return (await editText(env, chatId, statusMessageId, text, opts)) !== null;
+// fix-remove-placeholder: the operator's reference bot (Compass) sends NO
+// intermediate "thinking" message — the real reply is the first and only
+// message of a turn (handlers/webhook.ts -> runAgent -> one sendMessage).
+// Codex used to sendText('⏳ Working on it…') and edit it in place later;
+// that placeholder is now REMOVED entirely. Dispatch results are delivered
+// directly: text replies and dispatch failures go out as plain sendText;
+// the few genuinely long-running sub-operations (PDF render, Gemini edit)
+// still get their own purpose-named interim message, delivered via this
+// helper (send-then-edit). When there is no interim message (id null), the
+// helper degrades to a plain sendText, so callers never branch.
+async function deliver(env, chatId, statusMessageId, text, opts = {}) {
+  if (statusMessageId && (await editText(env, chatId, statusMessageId, text, opts)) !== null) return;
+  await sendText(env, chatId, text, opts);
 }
 
 // ---- case 4 (v7 fix-02): native function-calling dispatch ------------------
@@ -512,9 +517,7 @@ async function classifyAndDispatch(env, chatId, text, statusMessageId) {
     });
 
     if (!content) {
-      if (!(await replaceStatus(env, chatId, statusMessageId, "I'm here — could you say that again?"))) {
-        await sendText(env, chatId, "I'm here — could you say that again?");
-      }
+      await deliver(env, chatId, statusMessageId, "I'm here — could you say that again?");
       return;
     }
     contents.push(content);
@@ -529,17 +532,13 @@ async function classifyAndDispatch(env, chatId, text, statusMessageId) {
 
     // No function call -> conversation, not a failure. The model's text IS
     // the reply (the correct outcome for input like "Hi tell me something
-    // abstract").
+    // abstract"). With the placeholder removed this goes out as a plain
+    // sendText (chunked at 4000, so over-4096 replies are never lost) —
+    // exactly one message per user turn, like Compass's runAgent path.
     if (!calls.length) {
       const reply = textChunk.trim() ||
         'Sorry, I lost my train of thought there — could you rephrase or send that again?';
-      // PRIMARY ROOT CAUSE: this reply can exceed Telegram's 4096 cap; the
-      // old fire-and-forget editText swallowed the 400 and left "⏳ Working
-      // on it…" up forever. Chunking (editText) + sendText fallback keep
-      // the reply deliverable no matter what.
-      if (!(await replaceStatus(env, chatId, statusMessageId, reply))) {
-        await sendText(env, chatId, reply);
-      }
+      await deliver(env, chatId, statusMessageId, reply);
       return;
     }
 
@@ -558,10 +557,8 @@ async function classifyAndDispatch(env, chatId, text, statusMessageId) {
     if (allTerminal) return;
   }
 
-  if (!(await replaceStatus(env, chatId, statusMessageId,
-    'I hit a snag thinking that through. Try again in a moment?'))) {
-    await sendText(env, chatId, 'I hit a snag thinking that through. Try again in a moment?');
-  }
+  await deliver(env, chatId, statusMessageId,
+    'I hit a snag thinking that through. Try again in a moment?');
 }
 
 // Execute one function call against the real Codex handlers. Every branch
@@ -571,9 +568,7 @@ async function classifyAndDispatch(env, chatId, text, statusMessageId) {
 async function executeDispatchTool(env, chatId, statusMessageId, call, originalText) {
   const { name, args } = call;
   const fail = async (msg) => {
-    if (!(await replaceStatus(env, chatId, statusMessageId, msg))) {
-      await sendText(env, chatId, msg);
-    }
+    await deliver(env, chatId, statusMessageId, msg);
     return { response: { ok: false, error: msg }, terminal: true };
   };
   try {
@@ -585,7 +580,7 @@ async function executeDispatchTool(env, chatId, statusMessageId, call, originalT
       case 'read_topic': {
         const path = await resolvePath(env, String(args.path || '').replace(/\s*>\s*/g, '/'), true);
         if (path === null) return fail(`Topic not found: ${args.path}`);
-        await editText(env, chatId, statusMessageId, '📖 Here it is:');
+        await deliver(env, chatId, statusMessageId, '📖 Here it is:');
         await sendReadPage(env, chatId, path, 0, await h8(path));
         return { response: { ok: true, path }, terminal: true };
       }
@@ -595,15 +590,18 @@ async function executeDispatchTool(env, chatId, statusMessageId, call, originalT
           ? ''
           : await resolvePath(env, want.replace(/\s*>\s*/g, '/'), true);
         if (path === null) return fail(`Topic not found: ${args.path}`);
-        await editText(env, chatId, statusMessageId, '⏳ Rendering PDF…');
-        await doExport(env, chatId, path, statusMessageId);
+        // Long-running: keep a purpose-named interim message (this is NOT
+        // the removed "Working on it…" placeholder) and hand its id to
+        // doExport so its progress edits land in place.
+        const status = await sendText(env, chatId, '⏳ Rendering PDF…');
+        await doExport(env, chatId, path, status && status.message_id);
         return { response: { ok: true, path }, terminal: true };
       }
       case 'delete_topic': {
         const path = await resolvePath(env, String(args.path || '').replace(/\s*>\s*/g, '/'), true);
         if (path === null) return fail(`Topic not found: ${args.path}`);
         const breadcrumb = path.split('/').join(' › ');
-        await editText(env, chatId, statusMessageId,
+        await deliver(env, chatId, statusMessageId,
           `⚠️ Delete topic "${path.split('/').pop()}" (${breadcrumb}) and everything inside?`,
           { keyboard: confirmDeleteKeyboard(await h8(path), 'topic') });
         return { response: { ok: true, path, confirmPresented: true }, terminal: true };
@@ -611,7 +609,7 @@ async function executeDispatchTool(env, chatId, statusMessageId, call, originalT
       case 'delete_everything': {
         const count = (await listNodePaths(env, true)).filter(Boolean).length;
         if (!count) return fail('The notebook is already empty — nothing to delete.');
-        await editText(env, chatId, statusMessageId,
+        await deliver(env, chatId, statusMessageId,
           `⚠️ Delete the ENTIRE notebook — all ${count} topic${count === 1 ? '' : 's'} and every entry inside them?\n\nThis cannot be undone (recoverable only via git history).`,
           { keyboard: confirmDeleteKeyboard('root', 'EVERYTHING') });
         return { response: { ok: true, confirmPresented: true, topics: count }, terminal: true };
@@ -630,12 +628,12 @@ async function executeDispatchTool(env, chatId, statusMessageId, call, originalT
         const { browseKeyboard } = await import('./keyboards.js');
         const nodes = await getNodes(env);
         const root = nodes.get('');
-        await editText(env, chatId, statusMessageId, '🗂 Your topics — pick one to open:',
+        await deliver(env, chatId, statusMessageId, '🗂 Your topics — pick one to open:',
           { keyboard: await browseKeyboard('', root ? root.children : [], { backTo: null }) });
         return { response: { ok: true }, terminal: true };
       }
       case 'help': {
-        await editText(env, chatId, statusMessageId,
+        await deliver(env, chatId, statusMessageId,
           'I can capture notes (just send text or voice — I file them), browse, read, export, edit and delete. Commands: /new /add /topics /read /export /delete — or /help.');
         return { response: { ok: true }, terminal: true };
       }
@@ -701,9 +699,9 @@ async function handleEntryAction(env, chatId, statusMessageId, intent, mode) {
     if (best) { path = best.path; node = best.node; }
   }
 
-  if (!node) { await editText(env, chatId, statusMessageId, `Topic not found: ${intent.path}`); return; }
+  if (!node) { await deliver(env, chatId, statusMessageId, `Topic not found: ${intent.path}`); return; }
   if (!node.entries.length) {
-    await editText(env, chatId, statusMessageId, 'No entries found there.');
+    await deliver(env, chatId, statusMessageId, 'No entries found there.');
     return;
   }
   // Minimal reasoning to identify the entry from the hint:
@@ -725,18 +723,25 @@ User described: ${intent.entry_hint || ''}` }] }],
     const best = scored.reduce((a, b) => (b.score > (a ? a.score : -1) ? b : a), null);
     entry = (best && best.score > 0) ? best.e : node.entries[node.entries.length - 1];
   }
-  if (!entry) { await editText(env, chatId, statusMessageId, 'Could not identify that entry.'); return; }
+  if (!entry) { await deliver(env, chatId, statusMessageId, 'Could not identify that entry.'); return; }
 
   if (mode === 'delete') {
     const breadcrumb = path.split('/').join(' › ');
-    await editText(env, chatId, statusMessageId,
+    await deliver(env, chatId, statusMessageId,
       `⚠️ Delete entry ${entry.id} from ${node.title} (${breadcrumb})?\n\n_${entry.date}_\n${entry.body.slice(0, 200)}`,
       { keyboard: confirmDeleteKeyboard(`${await h8(path)}:${entry.id}`, 'entry') });
     return;
   }
 
-  // edit (case 3): read + rewrite only this entry
-  await editText(env, chatId, statusMessageId, '⏳ Editing…');
+  // edit (case 3): read + rewrite only this entry. The Gemini rewrite can
+  // take seconds, so this path keeps its own purpose-named interim message
+  // (NOT the removed "Working on it…" placeholder) and edits it with the
+  // result; with no interim message the interim send is skipped entirely.
+  let editStatusId = statusMessageId;
+  if (!editStatusId) {
+    const s = await sendText(env, chatId, '⏳ Editing…');
+    editStatusId = s && s.message_id;
+  }
   const rewritten = await gemini(env, {
     contents: [{ parts: [{ text:
 `Rewrite this notebook entry per the instruction. Output ONLY the new entry body (Markdown, keep any image embeds ![..](assets/..) unchanged unless the instruction says otherwise). No commentary.
@@ -749,10 +754,10 @@ ${intent.instruction || 'improve clarity'}` }] }],
     generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
   });
   const body = String(rewritten).trim();
-  if (!body) { await editText(env, chatId, statusMessageId, '❌ Edit produced nothing.'); return; }
+  if (!body) { await deliver(env, chatId, editStatusId, '❌ Edit produced nothing.'); return; }
   await updateEntry(env, path, entry.id, body);
   const breadcrumb = path.split('/').join(' › ');
-  await editText(env, chatId, statusMessageId,
+  await deliver(env, chatId, editStatusId,
     `✏️ Updated entry ${entry.id} in ${node.title} (${breadcrumb}):\n\n_${entry.date}_\n${body.slice(0, 400)}`);
 }
 
@@ -798,11 +803,11 @@ Reply with ONLY strict JSON: {"path":"<existing path with > separators>","captio
   const breadcrumb = nodePath.split('/').join(' › ');
   const title = node ? node.title : nodePath.split('/').pop();
   const created = !!decision.new;
-  await editText(env, chatId, statusMessageId,
+  await deliver(env, chatId, statusMessageId,
     created
       ? `✅ Created new topic "${title}" (${breadcrumb}) and filed the photo there as entry ${entryId}.`
       : `✅ Filed photo as entry ${entryId} under ${title} (${breadcrumb}).`,
     { keyboard: await filedActionsKeyboard(nodePath, entryId) });
 }
 
-export { gemini, parseJsonLoose, classifyAndDispatch, replaceStatus };
+export { gemini, parseJsonLoose, classifyAndDispatch, deliver };

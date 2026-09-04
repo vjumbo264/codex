@@ -15,7 +15,7 @@
 // credentials. Run: node worker/test/silent-nonresponse.test.mjs
 
 import { chunkText, sendText, editText } from '../src/telegram.js';
-import { replaceStatus } from '../src/gemini.js';
+import { deliver } from '../src/gemini.js';
 
 let passed = 0, failed = 0;
 function ok(cond, name) {
@@ -96,15 +96,25 @@ globalThis.fetch = async (url, init) => {
     'genuine editMessageText 400 IS logged (silent-400 suppression removed)');
 }
 
-// --- 5. replaceStatus fallback contract ----------------------------------
+// --- 5. deliver contract (post fix-remove-placeholder) ---------------------
+// replaceStatus was superseded by deliver(): edit in place when an interim
+// message exists; plain sendText when it does not (the placeholder is gone
+// from the free-text dispatch path); sendText fallback when the edit fails.
 {
   sent.length = 0;
-  const edited = await replaceStatus(ENV, 42, 555, 'recovered reply');
-  ok(edited === true, 'replaceStatus true when edit lands');
-  const noStatus = await replaceStatus(ENV, 42, null, 'fallback reply');
-  ok(noStatus === false, 'replaceStatus false with null statusMessageId (caller falls back to sendText)');
-  const failedEdit = await replaceStatus(ENV, 999, 555, 'x');
-  ok(failedEdit === false, 'replaceStatus false when the edit fails (caller falls back to sendText)');
+  await deliver(ENV, 42, 555, 'recovered reply');
+  ok(sent.length === 1 && sent[0].method === 'editMessageText',
+    'deliver edits in place when an interim message id exists');
+
+  sent.length = 0;
+  await deliver(ENV, 42, null, 'fallback reply');
+  ok(sent.length === 1 && sent[0].method === 'sendMessage',
+    'deliver sends a fresh message when there is NO interim message (placeholder-free path)');
+
+  sent.length = 0;
+  await deliver(ENV, 999, 555, 'x'); // dead chat: edit fails
+  ok(sent.some(s => s.method === 'editMessageText') && sent.some(s => s.method === 'sendMessage'),
+    'deliver falls back to sendText when the edit fails (reply never lost)');
 }
 
 console.error = origError;
