@@ -31,6 +31,11 @@
       "session": 2,
       "date_utc": "2026-09-04",
       "summary": "Implemented the confirmed fix (waitUntil refuted in session 1; root cause = over-4096 editText silently swallowed + null-status TypeError + log-only outer catch). telegram.js: chunkText(4000) added; sendText chunks; editText chunks overflow into follow-up messages and its result is meaningful; tg() now logs ALL editMessageText 400s except the not-modified no-op. gemini.js: exported classifyAndDispatch + new replaceStatus() helper that downgrades to sendText whenever a status message is missing or an edit fails; applied to routeFreeText (text + photo), classifyAndDispatch all 3 terminal replies, and executeDispatchTool fail path. index.js: outer catch now sends the user a generic failure message (Compass safeSendError pattern) instead of log-only. Regression suite 17/17 passing."
+    },
+    {
+      "session": 2,
+      "date_utc": "2026-09-04",
+      "summary": "Live verification via worker/test/live-verify.mjs: real classifyAndDispatch + real key pool + real tree, Telegram API intercepted with real 4096 enforcement. gemini-flash-lite-latest 503 pool-wide (v7 saturation persists); gemini-flash-latest run PASS: editMessageText len=1292 replaced the placeholder. Initiative code work complete; production deploy left as the single human-review item (sandbox cannot wrangler deploy)."
     }
   ],
   "fixes": [
@@ -117,7 +122,7 @@
     "cleanup": "deleted new node plants (1 files) \u2014 live tree restored to morning, morning/random + entry jh2t"
   },
   "initiative": "fix-codex-silent-nonresponse",
-  "current_step": "live_verification",
+  "current_step": "complete",
   "investigation": {
     "waitUntil_call_chain_confirmed": "index.js fetch(): after secret+json checks, ctx.waitUntil(async()=>{ syncCommandMenu; routeMessage/routeCallbackQuery }) then returns Response('ok',200) IMMEDIATELY \u2014 the Response does NOT await the work. routeMessage->routeFreeText (gemini.js) is inside that waitUntil. Production tail evidence: a signed synthetic free-text POST produced a full log trail ('telegram sendMessage -> 400 chat not found', 'gemini dispatch failed', 'update handling failed') from inside the waitUntil-deferred block \u2014 i.e. the waitUntil work RAN TO COMPLETION in production and was NOT killed mid-flight. So 'waitUntil deferral gets silently torn down' is REFUTED for this code path.",
     "compass_comparison_result": "The contract's premise is FALSE. Compass src/index.ts stashes ctx on globalThis.__ctx then returns handleWebhook(req,env); handlers/webhook.ts processMessage work is wrapped and handed to ctx.waitUntil(work) (line ~88) \u2014 Compass DOES use waitUntil in the webhook/fetch path, structurally identical to Codex. waitUntil therefore cannot be the differentiator. Other structural differences noted: (a) Compass's outer failure handler calls safeSendError() to message the user on total failure; Codex's index.js catch only console.error's (no user-visible message). (b) Compass services/telegram.ts sendMessage returns Promise<number|null> and guards firstMsgId (never an unguarded .message_id deref). (c) Compass wrangler.toml has compatibility_flags=['nodejs_compat']; Codex has none (not implicated). (d) Compass runs GEMINI_MODEL=gemini-3.1-flash-lite; Codex runs gemini-flash-lite-latest (the model FIX_STATE v7 recorded as 503-saturated at evidence time).",
@@ -136,8 +141,8 @@
     ]
   },
   "live_verification": {
-    "performed": false,
-    "result": ""
+    "performed": true,
+    "result": "worker/test/live-verify.mjs executed the REAL worker/src/gemini.js classifyAndDispatch against the REAL live KV key pool (7 keys) and the REAL live notebook tree, with the Telegram Bot API intercepted but enforcing the REAL 4096-char cap. Model availability note: configured alias gemini-flash-lite-latest returned 503 UNAVAILABLE on the whole pool at verification time (matching the v7 fix-01 saturation record); the same live run with GEMINI_MODEL=gemini-flash-latest completed: telegram calls captured = [{\"method\":\"editMessageText\",\"len\":1292}] \u2014 the placeholder WAS replaced by a visible, 4096-safe reply. LIVE VERIFY PASS. The regression suite (17/17) covers the primary root cause deterministically: a 9492-char reply now edits the placeholder (4000-char first chunk) plus 2 follow-up chunks, zero calls over 4096, genuine edit 400s logged, not-modified no-op quiet, replaceStatus falls back to sendText on null status/failed edit. Full end-to-end production verification (signed webhook POST against the live deployed Worker) is pending deploy \u2014 the sandbox cannot run wrangler deploy, and the operator must NOT message the bot before the fixed code is deployed or the old bug still stands."
   },
   "tests_added": [
     "worker/test/silent-nonresponse.test.mjs (17 assertions, all passing)",
@@ -146,13 +151,13 @@
   ],
   "full_suite_passing": true,
   "human_review_items": [
-    "Deploy: cd worker && npx wrangler deploy (KV namespace id placeholder 0000... must be replaced by scripts/predeploy.mjs output or dashboard id before a production deploy).",
-    "Consider pointing wrangler [vars] GEMINI_MODEL at gemini-flash-latest if gemini-flash-lite-latest stays 503-saturated (model health is a live variable; the 5xx key-rotation already absorbs most of it).",
-    "One pool key (index 4) returned 401 in the v7 round \u2014 may still be dead; remove via Settings."
+    "DEPLOY (required to close the user-visible symptom): cd worker && CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... node ../scripts/predeploy.mjs wrangler.toml && npx wrangler deploy \u2014 then send the bot a free-text message and confirm a reply follows the ack. The fix is committed (e5117ef) and pushed but NOT deployed from this session.",
+    "Consider GEMINI_MODEL=gemini-flash-latest in wrangler [vars]: gemini-flash-lite-latest was 503-saturated pool-wide during live verification.",
+    "Pool key index 4 (\u2026yMQw) returned 401 again during live verification \u2014 still dead; remove via Settings."
   ],
   "resume_from": {
-    "file": "worker/test/live-verify.mjs",
-    "component": "live verification",
-    "next_operation": "find KV namespace id via Cloudflare API, run live-verify.mjs, record result, final commit"
+    "file": "FIX_STATE.json",
+    "component": "initiative",
+    "next_operation": "none \u2014 investigation + fix + tests + harness-level live verification complete; only production deploy remains (human_review_items)"
   }
 }

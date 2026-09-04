@@ -60,7 +60,7 @@ const env = {
     },
     async put() {},
   },
-  GITHUB_REPO_TOKEN: 'unused-for-conversational-reply',
+  GITHUB_REPO_TOKEN: process.env.GITHUB_REPO_TOKEN || 'unused',
   REPO_OWNER: 'vjumbo264', REPO_NAME: 'codex', REPO_BRANCH: 'main',
 };
 
