@@ -9,7 +9,7 @@
 // ONE tiny classification call returning strict JSON — never re-reading or
 // re-writing stored content.
 
-import { sendText, editText } from './telegram.js';
+import { sendText, editText, sendChatAction } from './telegram.js';
 import { getNodes } from './tree.js';
 import { readNode, appendEntry, updateEntry, deleteEntry, deleteNodeTree, createNode } from './notes.js';
 import { resolveH8, resolvePath, findByName, listNodePaths } from './tree.js';
@@ -236,11 +236,14 @@ export function allFailedMessage(e) {
 // fix-03 v3: apply a natural-language edit instruction to a specific entry
 // (the tap-only edit entry point from the read view). Same reasoning path
 // as a Gemini-dispatched free-text edit: read + rewrite only this entry.
-export async function maybeApplyTapEdit(env, chatId, path, entryId, instruction, statusMessageId) {
+// Part 1 (Compass messaging pattern): no interim "Editing…" message — the
+// router's native typing indicator covers the wait and the result is the
+// single message of the turn.
+export async function maybeApplyTapEdit(env, chatId, path, entryId, instruction) {
   const node = await readNode(env, path);
   const entry = node && node.entries.find(e => e.id === entryId);
   if (!entry) {
-    await editText(env, chatId, statusMessageId, 'That entry no longer exists.');
+    await sendText(env, chatId, 'That entry no longer exists.');
     return;
   }
   const rewritten = await gemini(env, {
@@ -255,10 +258,10 @@ ${instruction || 'improve clarity'}` }] }],
     generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
   });
   const body = String(rewritten).trim();
-  if (!body) { await editText(env, chatId, statusMessageId, '❌ Edit produced nothing.'); return; }
+  if (!body) { await sendText(env, chatId, '❌ Edit produced nothing.'); return; }
   await updateEntry(env, path, entry.id, body);
   const breadcrumb = path.split('/').join(' › ');
-  await editText(env, chatId, statusMessageId,
+  await sendText(env, chatId,
     `✏️ Updated entry ${entry.id} in ${node.title} (${breadcrumb}):\n\n_${entry.date}_\n${body.slice(0, 400)}`);
 }
 
@@ -658,11 +661,11 @@ async function executeDispatchTool(env, chatId, statusMessageId, call, originalT
           ? ''
           : await resolvePath(env, want.replace(/\s*>\s*/g, '/'), true);
         if (path === null) return fail(`Topic not found: ${args.path}`);
-        // Long-running: keep a purpose-named interim message (this is NOT
-        // the removed "Working on it…" placeholder) and hand its id to
-        // doExport so its progress edits land in place.
-        const status = await sendText(env, chatId, '⏳ Rendering PDF…');
-        await doExport(env, chatId, path, status && status.message_id);
+        // Long-running: the native upload_document action covers the wait
+        // (Compass pattern — no interim message to strand); doExport runs
+        // silently and the PDF document itself is the reply.
+        await sendChatAction(env, chatId, 'upload_document');
+        await doExport(env, chatId, path, null);
         return { response: { ok: true, path }, terminal: true };
       }
       case 'delete_topic': {
@@ -801,15 +804,10 @@ User described: ${intent.entry_hint || ''}` }] }],
     return;
   }
 
-  // edit (case 3): read + rewrite only this entry. The Gemini rewrite can
-  // take seconds, so this path keeps its own purpose-named interim message
-  // (NOT the removed "Working on it…" placeholder) and edits it with the
-  // result; with no interim message the interim send is skipped entirely.
-  let editStatusId = statusMessageId;
-  if (!editStatusId) {
-    const s = await sendText(env, chatId, '⏳ Editing…');
-    editStatusId = s && s.message_id;
-  }
+  // edit (case 3): read + rewrite only this entry. Part 1 (Compass
+  // pattern): no interim "⏳ Editing…" message — the router's native typing
+  // indicator covers the Gemini rewrite and the result is delivered
+  // directly as the single message of the turn.
   const rewritten = await gemini(env, {
     contents: [{ parts: [{ text:
 `Rewrite this notebook entry per the instruction. Output ONLY the new entry body (Markdown, keep any image embeds ![..](assets/..) unchanged unless the instruction says otherwise). No commentary.
@@ -822,10 +820,10 @@ ${intent.instruction || 'improve clarity'}` }] }],
     generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
   });
   const body = String(rewritten).trim();
-  if (!body) { await deliver(env, chatId, editStatusId, '❌ Edit produced nothing.'); return; }
+  if (!body) { await deliver(env, chatId, statusMessageId, '❌ Edit produced nothing.'); return; }
   await updateEntry(env, path, entry.id, body);
   const breadcrumb = path.split('/').join(' › ');
-  await deliver(env, chatId, editStatusId,
+  await deliver(env, chatId, statusMessageId,
     `✏️ Updated entry ${entry.id} in ${node.title} (${breadcrumb}):\n\n_${entry.date}_\n${body.slice(0, 400)}`);
 }
 

@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'worker/**'
+      - 'migrations/**'
+      - 'scripts/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
@@ -18,7 +20,16 @@ jobs:
         with:
           node-version: 20
 
-      - name: Provision CODEX_KV namespace (idempotent)
+      - name: Install deps
+        working-directory: worker
+        run: npm install
+
+      # Provision the codex_db D1 database (idempotent find-or-create +
+      # wrangler.toml id stamping), apply migrations/ remotely, and carry
+      # the legacy KV key pool across exactly once. If this fails the
+      # deploy is skipped — we never ship code against an unmigrated
+      # schema (Compass deploy.yml discipline).
+      - name: Provision D1 + apply migrations (idempotent)
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

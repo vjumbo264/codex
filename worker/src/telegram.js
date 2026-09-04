@@ -67,6 +67,40 @@ export async function editText(env, chatId, messageId, text, opts = {}) {
   return edited;
 }
 
+// Telegram's NATIVE typing indicator (Compass services/telegram.ts
+// sendChatAction): Telegram renders this as its own built-in "user is
+// typing…" UI. There is no placeholder message to store an id for, edit
+// later, or ever leave stranded if something fails.
+// Compass sends it once per turn before dispatch and does NOT re-send it
+// for long-running work (confirmed against handlers/webhook.ts); Telegram
+// auto-expires the indicator after ~5s, so Codex re-sends it on a 4s
+// interval while dispatch is running (typingTicker below) — the re-send
+// cadence the Telegram Bot API documents for long operations.
+export function sendChatAction(env, chatId, action = 'typing') {
+  return tg(env, 'sendChatAction', { chat_id: chatId, action });
+}
+
+// Send the typing indicator now and keep re-sending it every 4s until
+// stop() is called. Hard-capped at ~60s so a wedged dispatch can never
+// leave the indicator firing forever.
+export function typingTicker(env, chatId, action = 'typing') {
+  let stopped = false;
+  let ticks = 0;
+  sendChatAction(env, chatId, action).catch(() => { /* non-fatal */ });
+  const timer = setInterval(() => {
+    if (stopped || ++ticks > 14) { clearInterval(timer); return; }
+    sendChatAction(env, chatId, action).catch(() => { /* non-fatal */ });
+  }, 4000);
+  return { stop() { stopped = true; clearInterval(timer); } };
+}
+
+// Run `work` with the native typing indicator active for the whole
+// duration (Compass: sendChatAction before dispatch; one reply after).
+export async function withTyping(env, chatId, work, action = 'typing') {
+  const t = typingTicker(env, chatId, action);
+  try { return await work(); } finally { t.stop(); }
+}
+
 export function sendPhoto(env, chatId, photoUrl, caption) {
   const payload = { chat_id: chatId, photo: photoUrl };
   if (caption) payload.caption = caption.slice(0, 1000);
@@ -91,8 +125,9 @@ export async function sendDocumentBytes(env, chatId, bytes, filename, caption) {
 }
 
 // Keep the Telegram `/` command menu in sync with what's actually
-// implemented. Called at most once per UTC day per KV namespace so this is
-// effectively free after the first update of the day.
+// implemented. Called at most once per UTC day (tracked in the D1
+// sys_state table — 'cmd_synced') so this is effectively free after the
+// first update of the day.
 const COMMANDS = [
   { command: 'start', description: 'Open the home menu' },
   { command: 'menu', description: 'Open the home menu' },
@@ -107,15 +142,22 @@ const COMMANDS = [
 
 export async function syncCommandMenu(env) {
   const today = new Date().toISOString().slice(0, 10);
-  if (env.CODEX_KV) {
+  if (env.CODEX_DB) {
     try {
-      const last = await env.CODEX_KV.get('sys:cmd_synced');
-      if (last === today) return;
+      const row = await env.CODEX_DB.prepare(
+        'SELECT value FROM sys_state WHERE key = ?1').bind('cmd_synced').first();
+      if (row && row.value === today) return;
     } catch { /* fall through and try anyway */ }
   }
   const out = await tg(env, 'setMyCommands', { commands: COMMANDS });
-  if (out !== null && env.CODEX_KV) {
-    try { await env.CODEX_KV.put('sys:cmd_synced', today); } catch { /* non-fatal */ }
+  if (out !== null && env.CODEX_DB) {
+    try {
+      await env.CODEX_DB.prepare(
+        `INSERT INTO sys_state (key, value) VALUES ('cmd_synced', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`
+      ).bind(today).run();
+    } catch { /* non-fatal */ }
   }
   return out;
 }

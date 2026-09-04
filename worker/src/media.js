@@ -1,11 +1,18 @@
 // Media ingestion. Photos: download from Telegram, store under the node's
 // assets/, append an entry embedding them — deterministic when a target
 // node is known; otherwise the caption/content goes through auto-filing.
-// Voice notes: need transcription (Gemini, task-07) before filing.
+// Voice notes: need transcription (Gemini) before filing.
 // Documents: text-bearing files (.txt/.md/.csv/.log/.json/.yaml/.xml, and
 // any text/* MIME) are read as note content and auto-filed just like a
 // typed note. A caption acts as filing context (may fast-path via
 // pattern matching in routeFreeText). fix-02.
+//
+// adapt-compass-pattern-d1-and-user-lock, Part 1: NO placeholder status
+// messages anywhere in this module ("⏳ Reading file…", "⏳ Saving photo…",
+// "⏳ Transcribing…", "⏳ Filing…" are all gone). The router shows
+// Telegram's NATIVE typing indicator for the whole turn (Compass
+// handlers/webhook.ts pattern); each handler does its work and sends
+// exactly ONE final message — the confirmation or the failure.
 
 import { downloadTgFile, sendText } from './telegram.js';
 import { storeImage, appendEntry, readNode } from './notes.js';
@@ -73,26 +80,24 @@ export async function handleDocumentMessage(env, message, explicitPath = null) {
   }
 
   const caption = (message.caption || '').trim();
-  const status = await sendText(env, chatId, '⏳ Reading file…');
-  const { editText } = await import('./telegram.js');
 
   let content;
   try {
     const { bytes } = await downloadTgFile(env, doc.file_id);
     if (bytes.length > MAX_TEXT_FILE_BYTES) {
-      await editText(env, chatId, status.message_id,
+      await sendText(env, chatId,
         `📎 That file is ${Math.round(bytes.length / 1024)} KB — larger than the ${Math.round(MAX_TEXT_FILE_BYTES / 1024)} KB cap.`);
       return;
     }
     content = decodeText(bytes).replace(/\r\n/g, '\n').trim();
   } catch (e) {
     console.error('doc download failed', e);
-    await editText(env, chatId, status.message_id, '❌ Could not download the file. Try again.');
+    await sendText(env, chatId, '❌ Could not download the file. Try again.');
     return;
   }
 
   if (!content) {
-    await editText(env, chatId, status.message_id, '📎 That file looks empty.');
+    await sendText(env, chatId, '📎 That file looks empty.');
     return;
   }
 
@@ -100,7 +105,6 @@ export async function handleDocumentMessage(env, message, explicitPath = null) {
 
   // Explicit destination (from /add): deterministic, ZERO Gemini.
   if (explicitPath) {
-    await editText(env, chatId, status.message_id, '⏳ Filing…');
     // If the file is clearly unstructured prose, we still don't call Gemini
     // on the explicit-path branch — the operator asked for a specific topic,
     // so we trust them and store the content as-is (same policy as typed
@@ -110,7 +114,7 @@ export async function handleDocumentMessage(env, message, explicitPath = null) {
     const node = await readNode(env, explicitPath);
     const breadcrumb = explicitPath.split('/').join(' › ');
     const title = node ? node.title : explicitPath.split('/').pop();
-    await editText(env, chatId, status.message_id,
+    await sendText(env, chatId,
       `✅ Filed ${fileLabel} as entry ${entryId} under ${title} (${breadcrumb}).`,
       { keyboard: await filedActionsKeyboard(explicitPath, entryId) });
     return;
@@ -120,7 +124,8 @@ export async function handleDocumentMessage(env, message, explicitPath = null) {
   // caption is an "add this to X:" / "new topic X:" fast-path, that path
   // will match and never invoke Gemini. Otherwise routeFreeText will run
   // one classification call, exactly as if the operator had typed the
-  // file's contents.
+  // file's contents. Either way the turn ends with exactly ONE message
+  // (Compass shape) — no "⏳ Reading file…" placeholder to clean up.
   const { routeFreeText } = await import('./gemini.js');
   // If the caption uses one of the explicit fast-paths, that pattern
   // expects "prefix TOPIC: content". Rebuild the string to match:
@@ -136,21 +141,8 @@ export async function handleDocumentMessage(env, message, explicitPath = null) {
   } else {
     dispatchText = content;
   }
-  // Fake a message-like object carrying just chat + text; routeFreeText
-  // only reads chat.id and dispatches. fix-remove-placeholder: the
-  // "⏳ Reading file…" message above is edited into the result of the
-  // explicit fast-path when it matches (deterministic branch — reuses the
-  // status message in place). When the caption/body needs Gemini dispatch,
-  // routeFreeText no longer emits a placeholder at all: its next visible
-  // message is the real reply, so the stale "Reading file…" message is
-  // deleted to leave exactly one message for the turn (Compass shape).
-  const { tg } = await import('./telegram.js');
   const pseudo = { chat: { id: chatId } };
-  const placeholderless = await routeFreeText(env, pseudo, dispatchText,
-    { statusMessageId: status.message_id });
-  if (!placeholderless) {
-    await tg(env, 'deleteMessage', { chat_id: chatId, message_id: status.message_id });
-  }
+  await routeFreeText(env, pseudo, dispatchText);
 }
 
 // Biggest photo variant = best quality.
@@ -172,7 +164,8 @@ export async function handlePhotoMessage(env, message, explicitPath) {
     return;
   }
 
-  const status = await sendText(env, chatId, '⏳ Saving photo…');
+  // Explicit destination: no "⏳ Saving photo…" placeholder — download,
+  // store, and send exactly one confirmation (or one failure) message.
   try {
     const photo = bestPhoto(message.photo);
     const { bytes, path: tgPath } = await downloadTgFile(env, photo.file_id);
@@ -181,16 +174,14 @@ export async function handlePhotoMessage(env, message, explicitPath) {
     const body = (caption ? caption + '\n\n' : '') + `![photo](${stored.rel})`;
     const entryId = await appendEntry(env, nodePath, body);
     const node = await readNode(env, nodePath);
-    const { editText } = await import('./telegram.js');
     const breadcrumb = nodePath.split('/').join(' › ');
     const title = node ? node.title : nodePath.split('/').pop();
-    await editText(env, chatId, status.message_id,
+    await sendText(env, chatId,
       `✅ Filed photo as entry ${entryId} under ${title} (${breadcrumb}).`,
       { keyboard: await filedActionsKeyboard(nodePath, entryId) });
   } catch (e) {
     console.error('photo ingest failed', e);
-    const { editText } = await import('./telegram.js');
-    await editText(env, chatId, status.message_id, '❌ Could not save the photo. Try again.');
+    await sendText(env, chatId, '❌ Could not save the photo. Try again.');
   }
 }
 
@@ -201,7 +192,7 @@ export async function handleVoiceMessage(env, message, explicitPath = null) {
   let pool;
   try { pool = await getKeys(env); }
   catch (e) {
-    // fix-01 v3: storage failures are surfaced, not mistaken for "no key".
+    // Storage failures are surfaced, not mistaken for "no key".
     const kvMsg = kvErrorMessage(e);
     if (kvMsg) { await sendText(env, chatId, kvMsg); return; }
     throw e;
@@ -211,34 +202,32 @@ export async function handleVoiceMessage(env, message, explicitPath = null) {
       '🎙 Voice notes need a Gemini API key for transcription. Add one via /menu → ⚙️ Settings → 🔑 Gemini API keys, or send text instead.');
     return;
   }
-  const status = await sendText(env, chatId, '⏳ Transcribing…');
+  // No "⏳ Transcribing…" / "⏳ Filing…" placeholders: the router's typing
+  // indicator covers the wait; exactly one final message follows.
   try {
     const media = message.voice || message.audio;
     const { bytes, path: tgPath } = await downloadTgFile(env, media.file_id);
     const { transcribeAndClean } = await import('./gemini.js');
     const cleaned = await transcribeAndClean(env, bytes, tgPath);
     if (!cleaned) throw new Error('empty transcription');
-    const { editText } = await import('./telegram.js');
     if (explicitPath) {
-      await editText(env, chatId, status.message_id, '⏳ Filing…');
       const entryId = await appendEntry(env, explicitPath, cleaned);
       const node = await readNode(env, explicitPath);
       const breadcrumb = explicitPath.split('/').join(' › ');
       const title = node ? node.title : explicitPath.split('/').pop();
-      await editText(env, chatId, status.message_id,
+      await sendText(env, chatId,
         `✅ Filed voice note as entry ${entryId} under ${title} (${breadcrumb}).`,
         { keyboard: await filedActionsKeyboard(explicitPath, entryId) });
     } else {
-      // No destination -> auto-file the cleaned text via Gemini.
-      await editText(env, chatId, status.message_id, '⏳ Filing…');
+      // No destination -> auto-file the cleaned text via Gemini (its own
+      // confirmation is the single reply).
       const { autoFileNote } = await import('./gemini.js');
-      await autoFileNote(env, chatId, cleaned, status.message_id);
+      await autoFileNote(env, chatId, cleaned, null);
     }
   } catch (e) {
     console.error('voice ingest failed', e);
-    const { editText } = await import('./telegram.js');
     const { allFailedMessage } = await import('./gemini.js');
-    await editText(env, chatId, status.message_id,
+    await sendText(env, chatId,
       allFailedMessage(e) || '❌ Transcription failed. Try again or send text.');
   }
 }

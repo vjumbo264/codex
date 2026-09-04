@@ -3,7 +3,7 @@
 // (d/D), cancel (c), and post-file actions (v/m/mt/n).
 // All deterministic — no Gemini.
 
-import { answerCb, sendText, editText } from './telegram.js';
+import { answerCb, sendText, editText, sendChatAction } from './telegram.js';
 import { h8 } from './util.js';
 import { resolveH8, getNodes } from './tree.js';
 import { readNode, deleteNodeTree, deleteEntry, moveEntry, createNode } from './notes.js';
@@ -159,15 +159,15 @@ export async function routeCallbackQuery(query, env) {
       const path = await resolveH8(env, a1);
       await answerCb(env, query.id);
       if (path === null) { await sendText(env, chatId, 'Not found.'); break; }
-      const status = await sendText(env, chatId, '⏳ Rendering PDF…');
-      try { await doExport(env, chatId, path, status && status.message_id); }
+      await sendChatAction(env, chatId, 'upload_document');
+      try { await doExport(env, chatId, path, null); }
       catch (e) { console.error(e); await sendText(env, chatId, '❌ Export failed.'); }
       break;
     }
     case 'X': { // export whole notebook
       await answerCb(env, query.id);
-      const status = await sendText(env, chatId, '⏳ Rendering PDF…');
-      try { await doExport(env, chatId, '', status && status.message_id); }
+      await sendChatAction(env, chatId, 'upload_document');
+      try { await doExport(env, chatId, '', null); }
       catch (e) { console.error(e); await sendText(env, chatId, '❌ Export failed.'); }
       break;
     }

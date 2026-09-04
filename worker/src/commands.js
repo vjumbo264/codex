@@ -1,6 +1,6 @@
 // Manual slash-command handlers — fully deterministic, ZERO Gemini usage.
 
-import { sendText } from './telegram.js';
+import { sendText, sendChatAction } from './telegram.js';
 import { h8 } from './util.js';
 import { resolvePath, getNodes, nodeExists } from './tree.js';
 import { createNode, appendEntry, readNode, deleteNodeTree, deleteEntry } from './notes.js';
@@ -116,9 +116,11 @@ export async function handleCommand(env, message) {
       if (!arg) { await sendText(env, chatId, 'Usage: /export <topic> or /export all'); return true; }
       const path = /^all$/i.test(arg) ? '' : await resolvePath(env, arg, true);
       if (path === null) { await sendText(env, chatId, `Topic not found: ${arg}`); return true; }
-      const status = await sendText(env, chatId, '⏳ Rendering PDF…');
+      // Native upload_document action covers the render wait (Compass
+      // pattern) — no "⏳ Rendering PDF…" placeholder message.
+      await sendChatAction(env, chatId, 'upload_document');
       try {
-        await doExport(env, chatId, path, status && status.message_id);
+        await doExport(env, chatId, path, null);
       } catch (e) {
         console.error('export failed', e);
         await sendText(env, chatId, '❌ Export failed. Please try again.');

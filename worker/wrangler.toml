@@ -12,19 +12,29 @@ REPO_OWNER = "vjumbo264"
 REPO_NAME = "codex"
 REPO_BRANCH = "main"
 GEMINI_MODEL = "gemini-flash-lite-latest"
+# adapt-compass-pattern-d1-and-user-lock, Part 3: the ONLY Telegram user
+# id this unreleased bot responds to. Every other sender gets a short
+# refusal message and no tool/D1/Gemini work. Change here, redeploy.
+AUTHORIZED_USER_ID = "6339561761"
 
-# Gemini key pool storage (fix-03). The namespace is auto-provisioned by
-# scripts/predeploy.mjs (runs in the deploy workflow): it creates the
-# namespace via the Cloudflare API when missing and stamps its id here, so
-# no Cloudflare dashboard access is ever required. The placeholder id is
-# never used for a deploy.
-[[kv_namespaces]]
-binding = "CODEX_KV"
-id = "00000000000000000000000000000000"
+# Storage (adapt-compass-pattern-d1-and-user-lock, Part 2): the Gemini key
+# pool and tiny sys state live in this D1 database — the same pattern as
+# the Compass reference (binding + database_name + migrations_dir). The
+# database is provisioned and migrated idempotently by
+# scripts/predeploy.mjs (runs in the deploy workflow before wrangler
+# deploys): it creates the database via the Cloudflare API when missing,
+# stamps its real id here, applies migrations/ remotely, and copies the
+# legacy KV key pool across exactly once. The placeholder id is never used
+# for a deploy.
+[[d1_databases]]
+binding = "CODEX_DB"
+database_name = "codex_db"
+database_id = "ae30162f-069f-43ca-b9cb-1c6b852ad2fb"
+migrations_dir = "../migrations"
 
 # Secrets (set via Cloudflare dashboard/API — never in this file):
 #   TELEGRAM_BOT_TOKEN  - Bot API token
 #   GITHUB_REPO_TOKEN   - fine-grained PAT, contents read/write on vjumbo264/codex
 #   WEBHOOK_SECRET      - random token; Telegram sends it as X-Telegram-Bot-Api-Secret-Token
-#   GEMINI_API_KEY      - legacy single key; auto-migrated into the KV key
+#   GEMINI_API_KEY      - legacy single key; auto-migrated into the D1 key
 #                         pool on first use (Settings → Keys in the bot)

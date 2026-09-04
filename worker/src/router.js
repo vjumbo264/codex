@@ -3,7 +3,7 @@
 // to the Gemini dispatch layer (tasks 06/07) — which is imported lazily so
 // the manual path contains no Gemini code at all.
 
-import { sendText } from './telegram.js';
+import { sendText, withTyping } from './telegram.js';
 import { handleCommand } from './commands.js';
 import { parsePending } from './pending.js';
 import { resolveH8, resolvePath } from './tree.js';
@@ -37,23 +37,28 @@ export async function routeMessage(message, env) {
   // 3) Media ingestion (task-06): photos file deterministically when a
   //    destination is explicit; voice notes need transcription (task-07);
   //    text-bearing documents (fix-02) are read as note content.
+  //
+  // Part 1 (Compass messaging pattern): the NATIVE typing indicator is
+  // shown for the whole turn (sendChatAction 'typing', re-sent every 4s
+  // for long work — Telegram auto-expires it after ~5s). No placeholder
+  // message is ever sent; exactly one final message follows.
   if (message.photo && message.photo.length) {
-    await handlePhotoMessage(env, message, null);
+    await withTyping(env, chatId, () => handlePhotoMessage(env, message, null));
     return;
   }
   if (message.voice || message.audio) {
-    await handleVoiceMessage(env, message);
+    await withTyping(env, chatId, () => handleVoiceMessage(env, message), 'record_voice');
     return;
   }
   if (message.document) {
-    await handleDocumentMessage(env, message, null);
+    await withTyping(env, chatId, () => handleDocumentMessage(env, message, null));
     return;
   }
 
   // 4) Free text -> Gemini auto-file dispatch (task-07)
   if (text) {
     const { routeFreeText } = await import('./gemini.js');
-    await routeFreeText(env, message, text);
+    await withTyping(env, chatId, () => routeFreeText(env, message, text));
   }
 }
 
@@ -191,16 +196,16 @@ async function handlePendingFlow(env, message, pending) {
     if (!instruction) { await sendText(env, chatId, 'Send the edit instruction, or tap Cancel.'); return true; }
     const path = await resolveH8(env, handle);
     if (path === null) { await sendText(env, chatId, 'That topic no longer exists.'); return true; }
-    const status = await sendText(env, chatId, '⏳ Editing…');
+    // Part 1 (Compass pattern): no "⏳ Editing…" placeholder — native
+    // typing indicator while the Gemini rewrite runs, one result message.
     const { maybeApplyTapEdit, allFailedMessage } = await import('./gemini.js');
     const { kvErrorMessage } = await import('./keypool.js');
     try {
-      await maybeApplyTapEdit(env, chatId, path, extra, instruction, status.message_id);
+      await withTyping(env, chatId, () => maybeApplyTapEdit(env, chatId, path, extra, instruction));
     } catch (e) {
       console.error('tap edit failed', e);
       const kvMsg = kvErrorMessage(e);
-      const { editText } = await import('./telegram.js');
-      await editText(env, chatId, status.message_id,
+      await sendText(env, chatId,
         kvMsg || allFailedMessage(e) || '❌ I could not apply that edit. Try again.');
     }
     return true;

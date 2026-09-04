@@ -14,7 +14,7 @@
 // worker/src/telegram.js + gemini.js code against it. No network, no
 // credentials. Run: node worker/test/silent-nonresponse.test.mjs
 
-import { chunkText, sendText, editText } from '../src/telegram.js';
+import { chunkText, sendText, editText, sendChatAction, withTyping } from '../src/telegram.js';
 import { deliver } from '../src/gemini.js';
 
 let passed = 0, failed = 0;
@@ -115,6 +115,39 @@ globalThis.fetch = async (url, init) => {
   await deliver(ENV, 999, 555, 'x'); // dead chat: edit fails
   ok(sent.some(s => s.method === 'editMessageText') && sent.some(s => s.method === 'sendMessage'),
     'deliver falls back to sendText when the edit fails (reply never lost)');
+}
+
+// --- 6. Part 1 (adapt-compass-pattern): the NATIVE typing indicator ------
+// Compass handlers/webhook.ts: sendChatAction(env, chatId, 'typing') before
+// dispatch; exactly one sendMessage with the real reply after; no
+// placeholder message ever exists. Codex matches that: the router wraps
+// dispatch in withTyping(), which fires sendChatAction immediately and
+// re-sends every 4s for long work (Telegram auto-expires it after ~5s).
+{
+  sent.length = 0;
+  let workSawTyping = false;
+  const result = await withTyping(ENV, 42, async () => {
+    workSawTyping = sent.some(s => s.method === 'sendChatAction' && s.payload.action === 'typing');
+    return 'done';
+  });
+  ok(result === 'done', 'withTyping returns the work result');
+  ok(workSawTyping, 'withTyping fires the NATIVE typing indicator BEFORE dispatch work completes');
+  ok(sent.filter(s => s.method === 'sendChatAction').every(s => s.payload.chat_id === 42),
+    'typing indicator targets the right chat');
+
+  sent.length = 0;
+  await sendChatAction(ENV, 42, 'typing');
+  ok(sent.length === 1 && sent[0].method === 'sendChatAction' && sent[0].payload.action === 'typing',
+    'sendChatAction sends Telegram\'s native sendChatAction API call');
+  ok(!sent.some(s => s.method === 'sendMessage'),
+    'typing indicator creates NO message (nothing to edit later or strand)');
+
+  // The typing ticker stops cleanly when work throws (no leak).
+  sent.length = 0;
+  let threw = false;
+  try { await withTyping(ENV, 42, async () => { throw new Error('boom'); }); } catch { threw = true; }
+  ok(threw && sent.some(s => s.method === 'sendChatAction'),
+    'withTyping still fires typing and propagates the error (caller\'s catch sends the fallback message)');
 }
 
 console.error = origError;
