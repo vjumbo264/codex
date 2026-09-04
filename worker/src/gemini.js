@@ -315,13 +315,41 @@ async function treeListing(env) {
 // ---- case 2: auto-filing --------------------------------------------------
 
 // Decide where a note belongs, file it, confirm with quick-action buttons.
-export async function autoFileNote(env, chatId, noteText, statusMessageId) {
+export async function autoFileNote(env, chatId, noteText, statusMessageId, explicitTitle = null) {
   // fix-remove-placeholder: no interim status edits — the file decision and
   // write happen immediately and the confirmation is the (single) reply.
-  const tree = await treeListing(env);
-  const raw = await gemini(env, {
-    contents: [{
-      parts: [{ text:
+  //
+  // fix-voice-instruction-routing: when the user explicitly named a topic
+  // (spoken or typed — "create a topic called X and put this inside"),
+  // honor that exact name instead of asking Gemini to guess one from the
+  // note's content. Previously file_note had no way to carry an explicit
+  // name through at all, so an explicitly-requested topic title was
+  // silently discarded in favor of an invented one.
+  let decision;
+  if (explicitTitle) {
+    const tree = await treeListing(env);
+    // Still let Gemini resolve whether this matches an EXISTING topic by
+    // that name (so "Groceries" doesn't create a duplicate if it already
+    // exists) — but the title itself, if new, is the user's exact words.
+    const raw = await gemini(env, {
+      contents: [{
+        parts: [{ text:
+`Existing topics (path > subpath):
+${tree}
+
+The user explicitly asked for a topic named "${explicitTitle}". Does an existing topic already match this name (allow for minor wording differences)? Reply with ONLY strict JSON:
+{"path": "<exact existing path using > separators>", "new": false}
+or, if none matches:
+{"title": "${explicitTitle}", "parent": "", "new": true}` }],
+      }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 512 },
+    });
+    decision = parseJsonLoose(raw) || { title: explicitTitle, parent: '', new: true };
+  } else {
+    const tree = await treeListing(env);
+    const raw = await gemini(env, {
+      contents: [{
+        parts: [{ text:
 `You file notes into a personal notebook's topic tree. Existing topics (path > subpath):
 ${tree}
 
@@ -331,14 +359,15 @@ or, to create a new topic: {"title": "<short topic title>", "parent": "<existing
 
 NOTE TO FILE:
 ${noteText}` }],
-    }],
-    // v7: 256 was not enough headroom on newer Gemini models — thinking
-    // tokens share this budget, so the JSON decision could be truncated
-    // mid-string (captured live: "no json in response" from an unfinished
-    // `{"action":"note","text":"` fragment).
-    generationConfig: { temperature: 0.2, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 512 } },
-  });
-  const decision = parseJsonLoose(raw);
+      }],
+      // v7: 256 was not enough headroom on newer Gemini models — thinking
+      // tokens share this budget, so the JSON decision could be truncated
+      // mid-string (captured live: "no json in response" from an unfinished
+      // `{"action":"note","text":"` fragment).
+      generationConfig: { temperature: 0.2, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 512 } },
+    });
+    decision = parseJsonLoose(raw);
+  }
   let nodePath = null;
   if (decision.new) {
     const parentPath = decision.parent ? await resolvePath(env, decision.parent, true) : '';
@@ -473,10 +502,13 @@ const DISPATCH_TOOLS = [{
   functionDeclarations: [
     {
       name: 'file_note',
-      description: 'Save a new note into the notebook (auto-filed to the best topic). Use whenever the user gives you content to remember, save, jot down, or store — including when they just state a fact, idea, reminder or task with no explicit command.',
+      description: 'Save a new note into the notebook. Use whenever the user gives you content to remember, save, jot down, or store — including when they just state a fact, idea, reminder or task with no explicit command. If the user explicitly names/asks for a topic (e.g. "create a topic called Groceries and put this inside", "file this under Ideas"), pass that exact name as topic_title so it is honored — do not let the note get auto-filed under a guessed title instead.',
       parameters: {
         type: 'OBJECT',
-        properties: { text: { type: 'STRING', description: 'The full note content to save.' } },
+        properties: {
+          text: { type: 'STRING', description: 'The note content to save (the actual content to remember — if the user\'s message was an instruction plus content, this is just the content part, not the instruction wording).' },
+          topic_title: { type: 'STRING', description: 'Optional. The EXACT topic name the user explicitly asked for, if any. Omit entirely if the user did not name a topic — auto-filing will choose one.' },
+        },
         required: ['text'],
       },
     },
@@ -645,7 +677,7 @@ async function executeDispatchTool(env, chatId, statusMessageId, call, originalT
   try {
     switch (name) {
       case 'file_note': {
-        await autoFileNote(env, chatId, String(args.text || originalText), statusMessageId);
+        await autoFileNote(env, chatId, String(args.text || originalText), statusMessageId, args.topic_title ? String(args.topic_title) : null);
         return { response: { ok: true }, terminal: true };
       }
       case 'read_topic': {

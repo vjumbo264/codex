@@ -219,10 +219,17 @@ export async function handleVoiceMessage(env, message, explicitPath = null) {
         `✅ Filed voice note as entry ${entryId} under ${title} (${breadcrumb}).`,
         { keyboard: await filedActionsKeyboard(explicitPath, entryId) });
     } else {
-      // No destination -> auto-file the cleaned text via Gemini (its own
-      // confirmation is the single reply).
-      const { autoFileNote } = await import('./gemini.js');
-      await autoFileNote(env, chatId, cleaned, null);
+      // No explicit destination was given (not sent as a reply into a
+      // specific topic) — the transcript could be a note OR a spoken
+      // instruction ("create a topic called X and put this inside"),
+      // exactly like typed free text. Route it through the same
+      // classifier/dispatcher text gets (classifyAndDispatch), not
+      // straight to autoFileNote, so voice gets the same reasoning
+      // about intent that text already gets. classifyAndDispatch's own
+      // auto-file tool covers the "just a note" case; it now also
+      // covers "create topic and file this" the way text always could.
+      const { classifyAndDispatch } = await import('./gemini.js');
+      await classifyAndDispatch(env, chatId, cleaned, null);
     }
   } catch (e) {
     console.error('voice ingest failed', e);
