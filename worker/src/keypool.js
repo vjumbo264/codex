@@ -141,14 +141,34 @@ function looksLikeKey(s) {
 // Returns { added, skipped, total }. Throws KeyPoolError if the pool
 // cannot be persisted — the caller MUST surface that instead of claiming
 // success (v3 fix-01).
+//
+// Part 2 (false key-exhaustion): each candidate is additionally split on
+// ALL embedded whitespace before validation, AND an exact self-concatenated
+// double (a string whose two halves are byte-identical — the confirmed live
+// corruption: key #5 pasted twice with no separator, stored as ONE 106-char
+// key that returned 401 on every model) is reduced to a single copy before
+// validation. Both defenses live here at the storage layer so they hold
+// even if a future caller forgets to pre-split (router.js already splits
+// pasted input on /\s+/).
+function undouble(s) {
+  if (s.length >= 40 && s.length % 2 === 0) {
+    const half = s.length / 2;
+    if (s.slice(0, half) === s.slice(half)) return s.slice(0, half);
+  }
+  return s;
+}
+
 export async function addKeys(env, candidates) {
   const keys = await getKeys(env);
   const existing = new Set(keys);
   let added = 0, skipped = 0;
   for (const raw of candidates) {
-    const k = String(raw || '').trim();
-    if (!looksLikeKey(k) || existing.has(k)) { skipped++; continue; }
-    keys.push(k); existing.add(k); added++;
+    for (const piece of String(raw || '').split(/\s+/)) {
+      const k = undouble(piece.trim());
+      if (!k) continue;
+      if (!looksLikeKey(k) || existing.has(k)) { skipped++; continue; }
+      keys.push(k); existing.add(k); added++;
+    }
   }
   if (added) await writePool(env, keys); // throws loudly on failure
   return { added, skipped, total: keys.length };
