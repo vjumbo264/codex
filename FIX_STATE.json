@@ -7,16 +7,38 @@
   "last_updated_utc": "2026-09-04",
   "round_summary": "Root cause CONFIRMED with captured evidence (fix-01): the old classifyAndDispatch demanded 'ONLY strict JSON' and hand-parsed it; for 'Hi tell me something abstract' the live model returned a TRUNCATED JSON fragment {'action':'note','text':' (300-token cap, thinking tokens eating the budget) which parseJsonLoose rejected with 'no json in response'; for the two delete inputs the pool's keys hit transient 503 UNAVAILABLE which the one-shot same-key retry let bubble. ALL failure categories collapsed into the single outer catch -> the identical generic 'I could not handle that' the operator saw on all three inputs. fix-02 rebuilt dispatch on Gemini NATIVE function-calling following the Compass pattern (motionssalt/compass src/ai/agent.ts): real functionDeclarations, bounded multi-round loop, plain-text-with-no-function-call is the valid conversational outcome, distinct friendly fallbacks at every failure point, one-round resolution for explicit requests, deletes still confirm-gated. fix-03 added a declared delete_everything tool + root-capable deleteNodeTree + D:root callback branch. fix-04 verified exact-name topic delete resolves live.",
   "session_history": [
-    {"session": 1, "date_utc": "2026-09-04", "summary": "Seeded v7 state (superseding v5), studied Compass reference (agent.ts/gemini.ts/tools.ts/toolExecutor.ts) and current worker/src/gemini.js end-to-end."},
-    {"session": 1, "date_utc": "2026-09-04", "summary": "fix-01 evidence captured via harness running the Worker's OWN code (verbatim current prompt, exported gem() pipeline, real live KV key pool of 7 keys, real live tree). Recorded verbatim below."},
-    {"session": 1, "date_utc": "2026-09-04", "summary": "fix-02+03+04 implemented atomically: geminiOnce now returns full response data; new geminiData/geminiContent split; 5xx same-key-retry now rotates to next key; classifyAndDispatch replaced by a 4-round function-calling loop with 9 declared tools; executeDispatchTool routes to existing handlers with per-failure specific messages; tree.js filesUnderNode root fix; callbacks.js D:root whole-notebook branch; routeFreeText outer-catch message no longer the old generic string. autoFileNote/autoFilePhoto output budgets raised 256->2048 with thinkingBudget 512 after live evidence of truncation ('no json in response')."},
-    {"session": 1, "date_utc": "2026-09-04", "summary": "Whole-round VERIFY passed: real routeFreeText executed end-to-end against the real live tree + real key pool (Telegram API intercepted for capture only). 6/6 inputs produced sensible, distinct, non-generic responses; literal outputs recorded below; auto-file side effect cleaned up (deleted new node plants, 1 file)."}
+    {
+      "session": 1,
+      "date_utc": "2026-09-04",
+      "summary": "Seeded v7 state (superseding v5), studied Compass reference (agent.ts/gemini.ts/tools.ts/toolExecutor.ts) and current worker/src/gemini.js end-to-end."
+    },
+    {
+      "session": 1,
+      "date_utc": "2026-09-04",
+      "summary": "fix-01 evidence captured via harness running the Worker's OWN code (verbatim current prompt, exported gem() pipeline, real live KV key pool of 7 keys, real live tree). Recorded verbatim below."
+    },
+    {
+      "session": 1,
+      "date_utc": "2026-09-04",
+      "summary": "fix-02+03+04 implemented atomically: geminiOnce now returns full response data; new geminiData/geminiContent split; 5xx same-key-retry now rotates to next key; classifyAndDispatch replaced by a 4-round function-calling loop with 9 declared tools; executeDispatchTool routes to existing handlers with per-failure specific messages; tree.js filesUnderNode root fix; callbacks.js D:root whole-notebook branch; routeFreeText outer-catch message no longer the old generic string. autoFileNote/autoFilePhoto output budgets raised 256->2048 with thinkingBudget 512 after live evidence of truncation ('no json in response')."
+    },
+    {
+      "session": 1,
+      "date_utc": "2026-09-04",
+      "summary": "Whole-round VERIFY passed: real routeFreeText executed end-to-end against the real live tree + real key pool (Telegram API intercepted for capture only). 6/6 inputs produced sensible, distinct, non-generic responses; literal outputs recorded below; auto-file side effect cleaned up (deleted new node plants, 1 file)."
+    }
   ],
   "fixes": [
     {
-      "id": "fix-01", "status": "done",
+      "id": "fix-01",
+      "status": "done",
       "name": "Confirm exact failure mode with real captured evidence",
-      "files": ["worker/src/gemini.js"], "commits": ["this push"],
+      "files": [
+        "worker/src/gemini.js"
+      ],
+      "commits": [
+        "this push"
+      ],
       "reproduced_failure_literal": "Verbatim current-prompt runs (configured model gemini-flash-lite-latest): all three inputs -> 'Error: Gemini 503: This model is currently experiencing high demand' (one-shot same-key retry hit the same 503, then bubble). Same prompt on gemini-flash-latest: 'Hi tell me something abstract' -> raw response literally '{\"action\":\"note\",\"text\":\"' (TRUNCATED mid-string at the 300-token cap) -> parseJsonLoose threw 'no json in response'. Every one of these paths lands in the same routeFreeText outer catch -> '❌ I could not handle that. Try a command from /help.' — the exact message the operator captured on all three inputs.",
       "root_cause": "Structural: (1) a demanded-strict-JSON hand-parsed classifier has no valid shape for non-actionable input, so prose/truncation/fences all throw; (2) maxOutputTokens 300 is eaten by thinking tokens on current models, truncating JSON mid-stream; (3) 503s were retried once on the SAME key then bubbled to the generic catch; (4) one catch for every category => one opaque message.",
       "fix": "Evidence only (rebuild is fix-02). Also confirmed gemini-flash-lite-latest 503-saturated, gemini-2.5-flash-lite and gemini-2.0-flash-lite RETIRED (404 no longer available), gemini-flash-latest healthy — model health is a live variable, hence the 5xx rotation hardening in fix-02.",
@@ -24,9 +46,15 @@
       "concerns": "The live bot's configured model (wrangler [vars] GEMINI_MODEL=gemini-flash-lite-latest) was returning 503s at evidence time; the new 5xx-rotation across the 7-key pool absorbs this far better, but the operator may want to point GEMINI_MODEL at gemini-flash-latest if the lite alias stays saturated. Not changed in code — runtime config."
     },
     {
-      "id": "fix-02", "status": "done",
+      "id": "fix-02",
+      "status": "done",
       "name": "Rebuild classifyAndDispatch on real Gemini function-calling (Compass pattern)",
-      "files": ["worker/src/gemini.js"], "commits": ["this push"],
+      "files": [
+        "worker/src/gemini.js"
+      ],
+      "commits": [
+        "this push"
+      ],
       "reproduced_failure_literal": "See fix-01.",
       "root_cause": "See fix-01.",
       "fix": "tools:[{functionDeclarations:[file_note, read_topic, export_pdf, delete_topic, delete_everything, delete_entry, edit_entry, browse_topics, help]}] with JSON-schema params; systemInstruction carries the tree + targeting rules (no more giant inline prompt); 4-round loop: geminiContent returns raw model content, functionCall parts execute via executeDispatchTool against the EXISTING handlers (autoFileNote, sendReadPage, doExport, confirmDeleteKeyboard flows, handleEntryAction), functionResponse parts feed back; zero calls => model text sent directly as the reply; fallbacks: missing content 'I'm here — could you say that again?', empty text 'lost my train of thought', round exhaustion 'I hit a snag thinking that through', per-tool failure 'That <tool> failed (<reason>). Nothing was changed'; all-terminal calls end in ONE round (quota-min principle); geminiOnce returns full data; 5xx now rotates keys after one same-key retry; legacy gemini() text-join preserved for transcription/auto-file/rewrite callers; deletes present confirm/cancel keyboards only — no auto-delete.",
@@ -34,9 +62,17 @@
       "concerns": "One pool key (index 4) returned 401 during verification — rotation absorbed it transparently; operator may want to remove that dead key via Settings."
     },
     {
-      "id": "fix-03", "status": "done",
+      "id": "fix-03",
+      "status": "done",
       "name": "Whole-notebook delete as a proper tool (delete_everything)",
-      "files": ["worker/src/gemini.js", "worker/src/tree.js", "worker/src/callbacks.js"], "commits": ["this push"],
+      "files": [
+        "worker/src/gemini.js",
+        "worker/src/tree.js",
+        "worker/src/callbacks.js"
+      ],
+      "commits": [
+        "this push"
+      ],
       "reproduced_failure_literal": "'Delete all topics' -> 503-bubble -> generic error (fix-01 evidence); even when the model answered, there was NO whole-notebook action shape at all.",
       "root_cause": "No such action existed; root deletion was also physically broken: filesUnderNode('') produced prefix 'notebook//' (never matches) and the callbacks D: branch assumed a non-root path (would have thrown path.split on null).",
       "fix": "Declared delete_everything tool (no path param); presents confirm keyboard 'D:root' with scoped warning naming the count ('all N topics and every entry inside them'); tree.js filesUnderNode uses 'notebook/' prefix for root; callbacks.js D: branch handles path '' with a whole-notebook confirmation result message.",
@@ -44,9 +80,15 @@
       "concerns": "Confirm callback D:root executes deleteNodeTree('') which deletes every file under notebook/ — verified code path, intentionally NOT executed against the live notebook for obvious reasons; single-topic D: path logic unchanged."
     },
     {
-      "id": "fix-04", "status": "done",
+      "id": "fix-04",
+      "status": "done",
       "name": "Exact-name topic delete ('morning') resolves under new architecture",
-      "files": ["worker/src/gemini.js"], "commits": ["this push"],
+      "files": [
+        "worker/src/gemini.js"
+      ],
+      "commits": [
+        "this push"
+      ],
       "reproduced_failure_literal": "'Delete the topic called morning' -> 503-bubble -> generic error (fix-01 evidence).",
       "root_cause": "Dispatch-level only: resolvePath handles 'morning' correctly (exact child-of-root leaf match); the v6 hypothesis about topics-with-children did not reproduce — the failure was entirely the JSON/503 collapse.",
       "fix": "None needed beyond fix-02; verified directly as required instead of assumed.",
@@ -68,5 +110,34 @@
     "delete_safety": "Both delete paths only PRESENTED confirm keyboards; tree snapshot before/after identical (nothing deleted without a tap).",
     "manual_command_path": "Untouched: router/commands/keyboards/read/export/pdf modules have zero diff except the scoped callbacks.js D: root branch and tree.js prefix fix.",
     "cleanup": "deleted new node plants (1 files) — live tree restored to morning, morning/random + entry jh2t"
+  },
+  "initiative": "fix-codex-silent-nonresponse",
+  "current_step": "root_cause_confirmed",
+  "investigation": {
+    "waitUntil_call_chain_confirmed": "index.js fetch(): after secret+json checks, ctx.waitUntil(async()=>{ syncCommandMenu; routeMessage/routeCallbackQuery }) then returns Response('ok',200) IMMEDIATELY — the Response does NOT await the work. routeMessage->routeFreeText (gemini.js) is inside that waitUntil. Production tail evidence: a signed synthetic free-text POST produced a full log trail ('telegram sendMessage -> 400 chat not found', 'gemini dispatch failed', 'update handling failed') from inside the waitUntil-deferred block — i.e. the waitUntil work RAN TO COMPLETION in production and was NOT killed mid-flight. So 'waitUntil deferral gets silently torn down' is REFUTED for this code path.",
+    "compass_comparison_result": "The contract's premise is FALSE. Compass src/index.ts stashes ctx on globalThis.__ctx then returns handleWebhook(req,env); handlers/webhook.ts processMessage work is wrapped and handed to ctx.waitUntil(work) (line ~88) — Compass DOES use waitUntil in the webhook/fetch path, structurally identical to Codex. waitUntil therefore cannot be the differentiator. Other structural differences noted: (a) Compass's outer failure handler calls safeSendError() to message the user on total failure; Codex's index.js catch only console.error's (no user-visible message). (b) Compass services/telegram.ts sendMessage returns Promise<number|null> and guards firstMsgId (never an unguarded .message_id deref). (c) Compass wrangler.toml has compatibility_flags=['nodejs_compat']; Codex has none (not implicated). (d) Compass runs GEMINI_MODEL=gemini-3.1-flash-lite; Codex runs gemini-flash-lite-latest (the model FIX_STATE v7 recorded as 503-saturated at evidence time).",
+    "other_swallowed_errors_found": [
+      "index.js:40-43 outer catch does ONLY console.error('update handling failed') — no sendText to the user. Any error escaping routeMessage/routeFreeText (including the TypeError below) results in total user silence. This is the sink that produces the observed 'ack then nothing'.",
+      "telegram.js tg() returns null on ANY non-OK Telegram response (sendMessage/editMessageText). A null result is only logged, never thrown, so callers that deref result.message_id throw a TypeError OUTSIDE their try/catch.",
+      "gemini.js:359 sendText('⏳ Working on it…') is OUTSIDE the try (try begins line 360); line 361 status.message_id throws if sendText returned null."
+    ],
+    "confirmed_root_cause": "PRIMARY (real-chat): Codex's conversational dispatch replies can exceed Telegram's 4096-char message cap; worker/src/telegram.js editText() passes the oversized text straight to editMessageText with NO chunking, and tg() converts the resulting 400 'message is too long' into a silent null (telegram.js:13 even suppresses the error log for editMessageText 400s). classifyAndDispatch (gemini.js:519) awaits editText(statusMessageId, reply) and never checks the null result, so the '⏳ Working on it…' placeholder is never replaced -> ack then total silence. EVIDENCE: live call to the configured model gemini-flash-lite-latest with the real function-calling dispatch payload returned a 9492-character reply (overTelegram4096=True). Compass's services/telegram.ts sendMessage chunks at 4000 chars and returns a guarded Promise<number|null>, so Compass never strands a placeholder — this is the actual behavioral difference, NOT waitUntil. SECONDARY (proven in production logs): a signed synthetic free-text POST showed sendText('⏳ Working on it…') is OUTSIDE the try (gemini.js:359), so when sendText returns null (Telegram send failure) line 361 status.message_id throws a TypeError that escapes the inner catch and lands in index.js's log-only outer catch -> silence. AGGRAVATOR: gemini-flash-lite-latest returned 503 on 3/4 live calls (model saturation, matching FIX_STATE v7's note); the swallowed-edit path turns even a retry-exhausted error message into silence. waitUntil was REFUTED as a cause: Compass uses ctx.waitUntil in the same webhook path and the production tail showed the waitUntil work running to completion."
+  },
+  "fix": {
+    "status": "in_progress",
+    "approach": "Match Compass's guarantees: (1) add chunkText-based splitting (4000-char) to telegram.js and use it in sendText; make editText chunk too and RETURN whether the edit succeeded, and make tg() log editMessageText failures (stop the silent-400 suppression except 'message is not modified'); (2) classifyAndDispatch: fall back to sendText when the edit returns null so the reply is never lost; (3) routeFreeText/photo/tap-edit: null-safe status (status && status.message_id) and wrap the status send inside the try with a sendText fallback; (4) index.js outer catch: sendText the user a generic failure message (Compass safeSendError pattern) instead of log-only.",
+    "commits": []
+  },
+  "live_verification": {
+    "performed": false,
+    "result": ""
+  },
+  "tests_added": [],
+  "full_suite_passing": false,
+  "human_review_items": [],
+  "resume_from": {
+    "file": "worker/src/gemini.js",
+    "component": "routeFreeText",
+    "next_operation": "apply null-safe status + fallback send fix"
   }
 }
