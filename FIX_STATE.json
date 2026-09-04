@@ -51,6 +51,11 @@
       "session": 3,
       "date_utc": "2026-09-04",
       "summary": "PART 1 COMPLETE: removed the \"\u23f3 Working on it\u2026\" placeholder and its entire edit-in-place chain from the free-text dispatch path (and the \"\u23f3 Filing photo\u2026\" placeholder). Dispatch replies, tool outcomes and failures are delivered directly via a new deliver() helper; only genuinely long-running sub-operations (PDF render, Gemini entry edit) keep their own purpose-named interim messages. media.js non-explicit document path reworked so its \"Reading file\u2026\" message is consumed in place by deterministic fast-paths or deleted before Gemini dispatch. Regression suite (silent-nonresponse.test.mjs) updated to the deliver() contract: 17/17 passing."
+    },
+    {
+      "session": 3,
+      "date_utc": "2026-09-04",
+      "summary": "PART 2 INVESTIGATION COMPLETE with real captured evidence (harnesses committed at worker/test/diag/: kv.mjs pool/cursor reader, keys.mjs per-key status/body sweep across 3 models + Compass-shape comparison, gemini-data.mjs REAL geminiData() rotation reproduction). Reproduced the exact allKeysFailed throw on the configured model; identified corrupted doubled-paste key [4]; confirmed model-side 503 saturation as the false-negative driver; refuted KV-path mismatch, pool race, and waitUntil-timing hypotheses."
     }
   ],
   "fixes": [
@@ -137,7 +142,7 @@
     "cleanup": "deleted new node plants (1 files) \u2014 live tree restored to morning, morning/random + entry jh2t"
   },
   "initiative": "remove-placeholder-and-fix-false-key-exhaustion",
-  "current_step": "part1-committed",
+  "current_step": "part2-investigation-complete",
   "live_verification": {
     "part1_performed": false,
     "part1_result": "",
@@ -151,8 +156,8 @@
   ],
   "resume_from": {
     "file": "worker/src/gemini.js",
-    "component": "geminiData/keypool",
-    "next_operation": "Part 2 investigation: pull the REAL key pool from the live CODEX_KV namespace via the Cloudflare API, reproduce a failing request with the worker's OWN geminiData/geminiOnce code, capture real status+body per key, and test the model/payload/auth hypotheses."
+    "component": "geminiData/allFailedMessage",
+    "next_operation": "Part 2 FIX: (1) bounded retry-with-backoff on 503 before declaring pool exhaustion; (2) truthful error message distinguishing model-saturation 503s from genuine key failures; (3) addKeys hygiene: split pasted input on whitespace too so doubled-paste keys never enter the pool; (4) regression tests reproducing the confirmed misclassification; (5) operator-facing notes: switch GEMINI_MODEL to a healthy model, remove corrupted key [4]."
   },
   "prior_initiatives": [
     {
@@ -219,9 +224,21 @@
   },
   "part2_key_exhaustion": {
     "investigation": {
-      "real_status_body_evidence": [],
-      "hypothesis_tested": [],
-      "confirmed_root_cause": ""
+      "real_status_body_evidence": [
+        "Live KV read (Cloudflare API, namespace CODEX_KV f1ad0d7e\u2026): gemini:keys = 7 keys [\u2026zN0A, \u2026MPTA, \u2026Yf_w, \u2026Hw2A, \u2026yMQw, \u2026cOgw, \u2026d-jw]; gemini:last_ok_idx=0; gemini:migrated=1. Pool read at request time IS the same KV key the Settings UI writes \u2014 same namespace, same gemini:keys path (keypool.js KEYS_KEY). Pool size 7 confirmed.",
+        "Key [4] \u2026yMQw is 106 chars \u2014 exactly 2x the 53-char length of the other six \u2014 and returns HTTP 401 UNAUTHENTICATED on EVERY model (\"Request had invalid authentication credentials. Expected OAuth 2 access token\u2026\"). It is a corrupted duplicate-paste: the contract's key list itself shows key #5 pasted twice with no newline (\"\u2026yMQwAQ.Ab8RN6Ix1d\u2026yMQw\"), and the addKeys parser splits pasted input per line, so the doubled line was stored as one bad key.",
+        "Per-key sweep, worker request shape (x-goog-api-key header, dispatch payload with tools + thinkingBudget 512): model gemini-flash-lite-latest -> key0 503 UNAVAILABLE, key1 503, key2 503, key3 503, key4 401 UNAUTHENTICATED, key5 200 OK (\"OK.\"), key6 503. Model gemini-flash-latest -> key0 503, key1 503, key2 200, key3 200, key4 401, key5 503, key6 200. Model gemini-3.1-flash-lite (Compass's configured model) -> 200 OK on six of seven keys (only key4 401).",
+        "REAL worker geminiData() rotation loop (imported verbatim from worker/src/gemini.js) against the REAL pool: model gemini-flash-lite-latest run 1 -> all 7 keys tried, six return 503 UNAVAILABLE twice each (same-key retry), key4 returns 401, loop exhausts and THROWS err.allKeysFailed=true \"all 7 Gemini key(s) failed for this request (last: Gemini 503: \u2026high demand\u2026)\" \u2014 the exact false \"all keys failed\" report the operator sees. run 2 (seconds later): key0 503 then 200 OK -> SUCCESS. gemini-flash-latest: 200 OK on first key both runs.",
+        "Compass request shape (?key= query param, otherwise identical payload) on gemini-flash-lite-latest returns the identical 503 UNAVAILABLE \u2014 the auth transport (header vs query param) is NOT the differentiator."
+      ],
+      "hypothesis_tested": [
+        "H1 pool read from a different KV namespace/key than the UI writes -> REFUTED: request-time read and UI read share keypool.js gemini:keys in CODEX_KV; live read returns the same 7 keys the operator sees in Settings.",
+        "H2 model/payload shape difference vs Compass (model version the keys are not provisioned for) -> CONFIRMED as the primary driver: the 503s are MODEL-side saturation (\"This model is currently experiencing high demand\"), not key rejection \u2014 identical on every key and on Compass's own request shape. Codex runs GEMINI_MODEL=gemini-flash-lite-latest (and gemini-flash-latest shows the same per-key 503 flakiness); Compass runs gemini-3.1-flash-lite, on which the same keys return 200. So \"same keys work on Compass\" because Compass asks a healthy model, not because the keys differ.",
+        "H3 keys.length race leaving an empty/partial pool -> REFUTED: pool read is a single awaited KV get; live reproduction loaded all 7 keys every run; the failure reproduced with a full 7-key pool, so it is intermittent (503-lottery), not a partial-read artifact.",
+        "H4 waitUntil-removal/timing interaction breaking KV reads -> REFUTED: geminiData receives a fully-resolved pool (getKeys awaited before the loop); reproduction shows the loop iterating all 7 keys \u2014 KV reads complete fine; the allKeysFailed throw happens AFTER the full sweep, not from an empty pool.",
+        "H5 (discovered during evidence collection) corrupted pool entry -> CONFIRMED: key[4] is a doubled-paste 106-char string that hard-fails 401 on every model; rotation absorbs it (skips to next key) but it burns one pool slot and one attempt per full sweep."
+      ],
+      "confirmed_root_cause": "The \"\u274c Every configured Gemini API key failed\" report fires when geminiData() exhausts the pool on gemini-flash-lite-latest, whose real per-attempt outcome is a saturated-model 503 UNAVAILABLE lottery (captured live: 503 on 6/7 keys x2 attempts each, then a clean 200 on the very next run seconds later). isKeyFailure() correctly classifies 503 as NOT key-specific, but the loop treats a persistent 503 the same as a dead key \u2014 rotate and count toward exhaustion \u2014 so a burst of model-side 503s across the pool collapses into the all-keys-failed error whose message falsely claims \"quota exhausted or keys invalid\". Two aggravators: (a) pool key [4] \u2026yMQw is a corrupted doubled-paste (106 chars) that 401s on every model, wasting a slot; (b) Codex is pinned to the saturated gemini-flash-lite-latest alias while Compass \u2014 the operator's \"keys work fine\" reference \u2014 runs gemini-3.1-flash-lite, on which the identical keys return 200."
     },
     "fix": {
       "status": "not_started",
