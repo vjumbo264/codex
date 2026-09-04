@@ -8,7 +8,7 @@ import { syncCommandMenu } from './telegram.js';
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== 'POST') {
-      return new Response('codex-bot ok', { status: 200 });
+      return new Response('codex-bot ok · probe-v4-0904a', { status: 200 });
     }
 
     // Verify the request really comes from Telegram (set via setWebhook).
