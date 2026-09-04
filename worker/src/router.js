@@ -73,9 +73,22 @@ async function handlePendingFlow(env, message, pending) {
       return true;
     }
     const candidates = text.split('\n').map(s => s.trim()).filter(Boolean);
-    const { addKeys } = await import('./keypool.js');
+    const { addKeys, kvErrorMessage } = await import('./keypool.js');
     const { keysScreen } = await import('./ui.js');
-    const res = await addKeys(env, candidates);
+    let res;
+    try {
+      res = await addKeys(env, candidates);
+    } catch (e) {
+      // fix-01 v3: a KV storage failure is LOUD — never reported as
+      // "key added" and never rendered as an empty pool.
+      const kvMsg = kvErrorMessage(e);
+      if (kvMsg) {
+        const screen = await keysScreen(env);
+        await sendText(env, chatId, `${kvMsg}\n\n${screen.text}`, { keyboard: screen.keyboard });
+        return true;
+      }
+      throw e;
+    }
     let head;
     if (res.added === 0) {
       head = `⚠️ No keys added — ${res.skipped} line${res.skipped === 1 ? ' was' : 's were'} invalid or already stored.`;
@@ -119,13 +132,31 @@ async function handlePendingFlow(env, message, pending) {
   }
 
   if (flow === 'newtopic') {
-    // handle = h8 of current node, extra = entry id; message.text = new topic name
+    // Two uses: (a) move flow — handle = h8 of current node, extra = entry
+    // id; (b) fix-03 v3 tap-only topic creation — handle = root, no extra.
     if (message.text && /^(cancel|stop|abort|never ?mind)$/i.test(message.text.trim())) {
       await sendText(env, chatId, 'Cancelled.');
       return true;
     }
     const name = (message.text || '').trim();
     if (!name) { await sendText(env, chatId, 'Send a topic name, or tap Cancel.'); return true; }
+    if (!extra) { // pure "New topic" from Home/Browse
+      try {
+        const made = await createNode(env, '', name);
+        const { browseKeyboard } = await import('./keyboards.js');
+        const { getNodes } = await import('./tree.js');
+        const nodes = await getNodes(env, true);
+        const rec = nodes.get(made.path);
+        const kb = await browseKeyboard(made.path, rec ? rec.children : [], { backTo: '' });
+        await sendText(env, chatId,
+          `✅ Created new topic "${name}" (${made.path.split('/').join(' › ')}).`,
+          { keyboard: kb });
+      } catch (e) {
+        console.error(e);
+        await sendText(env, chatId, '❌ Could not create the topic. Try again.');
+      }
+      return true;
+    }
     const fromPath = await resolveH8(env, handle);
     if (fromPath === null) { await sendText(env, chatId, 'Original note no longer found.'); return true; }
     try {
@@ -138,6 +169,32 @@ async function handlePendingFlow(env, message, pending) {
     } catch (e) {
       console.error(e);
       await sendText(env, chatId, '❌ Could not create/move. Try again.');
+    }
+    return true;
+  }
+
+  if (flow === 'edit') {
+    // fix-03 v3: tap-only entry edit — handle = node h8, extra = entry id;
+    // message.text = the operator's natural-language edit instruction.
+    if (message.text && /^(cancel|stop|abort|never ?mind)$/i.test(message.text.trim())) {
+      await sendText(env, chatId, 'Cancelled.');
+      return true;
+    }
+    const instruction = (message.text || '').trim();
+    if (!instruction) { await sendText(env, chatId, 'Send the edit instruction, or tap Cancel.'); return true; }
+    const path = await resolveH8(env, handle);
+    if (path === null) { await sendText(env, chatId, 'That topic no longer exists.'); return true; }
+    const status = await sendText(env, chatId, '⏳ Editing…');
+    const { maybeApplyTapEdit, allFailedMessage } = await import('./gemini.js');
+    const { kvErrorMessage } = await import('./keypool.js');
+    try {
+      await maybeApplyTapEdit(env, chatId, path, extra, instruction, status.message_id);
+    } catch (e) {
+      console.error('tap edit failed', e);
+      const kvMsg = kvErrorMessage(e);
+      const { editText } = await import('./telegram.js');
+      await editText(env, chatId, status.message_id,
+        kvMsg || allFailedMessage(e) || '❌ I could not apply that edit. Try again.');
     }
     return true;
   }

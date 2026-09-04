@@ -192,8 +192,16 @@ export async function handlePhotoMessage(env, message, explicitPath) {
 // Voice note ingestion: transcribe + clean via Gemini, then file.
 export async function handleVoiceMessage(env, message, explicitPath = null) {
   const chatId = message.chat.id;
-  const { getKeys } = await import('./keypool.js');
-  if (!(await getKeys(env)).length) {
+  const { getKeys, kvErrorMessage } = await import('./keypool.js');
+  let pool;
+  try { pool = await getKeys(env); }
+  catch (e) {
+    // fix-01 v3: storage failures are surfaced, not mistaken for "no key".
+    const kvMsg = kvErrorMessage(e);
+    if (kvMsg) { await sendText(env, chatId, kvMsg); return; }
+    throw e;
+  }
+  if (!pool.length) {
     await sendText(env, chatId,
       '🎙 Voice notes need a Gemini API key for transcription. Add one via /menu → ⚙️ Settings → 🔑 Gemini API keys, or send text instead.');
     return;

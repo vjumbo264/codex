@@ -9,6 +9,9 @@
 //   ka  — add keys: ForceReply prompt     ("ka:root")
 //   kr  — remove key by index             ("kr:<i>")
 //   kc  — clear all keys                  ("kc:root" ask / "kc:confirm" do)
+//   nt  — new topic: ForceReply name prompt ("nt:root")        (fix-03 v3)
+//   an  — add note to a topic: ForceReply  ("an:<h8>")         (fix-03 v3)
+//   e   — edit an entry: ForceReply        ("e:<h8>:<id>")     (fix-03 v3)
 //
 // Capture (sending text/voice/photo/file) still works by just sending the
 // content — that part is not a screen, it is the bot's input.
@@ -27,6 +30,7 @@ Or pick an action:`;
 export function homeKeyboard() {
   return [
     [btn('🗂 Browse topics', 'b:root')],
+    [btn('➕ New topic', 'nt:root')],
     [btn('📄 Export', 'x:menu')],
     [btn('⚙️ Settings', 's:root')],
   ];
@@ -48,23 +52,36 @@ export function settingsKeyboard() {
 }
 
 // Settings → Keys screen: title + masked key list + actions.
+// fix-01 v3: a KV storage failure is shown LOUDLY here — never rendered
+// as an innocent "No keys configured yet."
 export async function keysScreen(env) {
-  const keys = await getKeys(env);
+  let keys = [];
+  let storageErr = null;
+  try { keys = await getKeys(env); }
+  catch (e) { storageErr = e; }
   const lines = ['🔑 Settings — Gemini API keys', ''];
-  if (keys.length) {
+  if (storageErr) {
+    lines.push(`⚠️ Key storage problem: ${storageErr.message}`);
+    lines.push('');
+    lines.push('Keys cannot be listed, added or removed until this is fixed (it is logged in the Worker logs).');
+  } else if (keys.length) {
     keys.forEach((k, i) => lines.push(`${i + 1}. ${maskKey(k)}`));
   } else {
     lines.push('No keys configured yet.');
   }
   lines.push('');
-  lines.push(keys.length
-    ? `${keys.length} key${keys.length === 1 ? '' : 's'} stored. Keys are tried in order; the bot remembers the last working one.`
-    : 'Add at least one key to enable auto-filing, voice notes, and edits.');
-  const rows = [[btn('➕ Add keys', 'ka:root')]];
-  for (let i = 0; i < keys.length; i++) {
-    rows.push([btn(`🗑 Remove ${i + 1} (${maskKey(keys[i])})`, `kr:${i}`)]);
+  if (!storageErr) {
+    lines.push(keys.length
+      ? `${keys.length} key${keys.length === 1 ? '' : 's'} stored. Keys are tried in order; the bot remembers the last working one.`
+      : 'Add at least one key to enable auto-filing, voice notes, and edits.');
   }
-  if (keys.length) rows.push([btn('🧹 Clear all keys', 'kc:root')]);
+  const rows = storageErr ? [] : [[btn('➕ Add keys', 'ka:root')]];
+  if (!storageErr) {
+    for (let i = 0; i < keys.length; i++) {
+      rows.push([btn(`🗑 Remove ${i + 1} (${maskKey(keys[i])})`, `kr:${i}`)]);
+    }
+    if (keys.length) rows.push([btn('🧹 Clear all keys', 'kc:root')]);
+  }
   rows.push([btn('◀️ Back', 's:root'), btn('🏠 Home', 'h:root')]);
   return { text: lines.join('\n'), keyboard: rows };
 }

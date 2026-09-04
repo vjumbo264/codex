@@ -10,7 +10,7 @@ import { readNode, deleteNodeTree, deleteEntry, moveEntry, createNode } from './
 
 import { browseKeyboard, confirmDeleteKeyboard, moveTargetKeyboard } from './keyboards.js';
 import { HOME_TEXT, homeKeyboard, exportMenuKeyboard, settingsKeyboard, keysScreen, addKeysPrompt } from './ui.js';
-import { removeKeyAt, clearKeys, maskKey } from './keypool.js';
+import { removeKeyAt, clearKeys, maskKey, kvErrorMessage } from './keypool.js';
 import { sendReadPage } from './read.js';
 import { doExport } from './export.js';
 import { tokenFooter } from './pending.js';
@@ -47,8 +47,36 @@ export async function routeCallbackQuery(query, env) {
     }
     case 'sk': { // settings -> Gemini keys
       await answerCb(env, query.id);
-      const screen = await keysScreen(env);
+      const screen = await keysScreen(env); // shows KV failures loudly (fix-01 v3)
       await editText(env, chatId, messageId, screen.text, { keyboard: screen.keyboard });
+      break;
+    }
+    case 'nt': { // new topic (fix-03 v3): ForceReply prompt for the name
+      await answerCb(env, query.id);
+      await sendText(env, chatId,
+        `Name for the new topic:\n\n${tokenFooter('newtopic', 'root')}`,
+        { forceReply: true, placeholder: 'New topic name…' });
+      break;
+    }
+    case 'an': { // add note to this topic (fix-03 v3): ForceReply prompt
+      const path = await resolveH8(env, a1);
+      await answerCb(env, query.id);
+      if (path === null) { await sendText(env, chatId, 'That topic no longer exists.'); break; }
+      await sendText(env, chatId,
+        `Send the note for "${path.split('/').pop()}" (text, a photo, a voice note, or a text file; reply to this message):\n\n${tokenFooter('add', a1)}`,
+        { forceReply: true, placeholder: 'Type your note…' });
+      break;
+    }
+    case 'e': { // edit entry (fix-03 v3): ForceReply prompt for the instruction
+      const path = await resolveH8(env, a1);
+      await answerCb(env, query.id);
+      if (path === null) { await sendText(env, chatId, 'That topic no longer exists.'); break; }
+      const node = await readNode(env, path);
+      const entry = node && node.entries.find(x => x.id === a2);
+      if (!entry) { await sendText(env, chatId, 'That entry no longer exists.'); break; }
+      await sendText(env, chatId,
+        `✏️ Editing entry ${a2} in ${node.title}:\n\n_${entry.date}_\n${entry.body.slice(0, 200)}\n\nReply with your edit instruction (e.g. "make it shorter", "change the date to Friday"):\n\n${tokenFooter('edit', a1, a2)}`,
+        { forceReply: true, placeholder: 'How should I change it?' });
       break;
     }
     case 'ka': { // add keys -> ForceReply prompt
@@ -59,21 +87,41 @@ export async function routeCallbackQuery(query, env) {
     }
     case 'kr': { // remove key by index (tap only — never retype a key)
       const idx = parseInt(a1 || '-1', 10);
-      const removed = await removeKeyAt(env, idx);
-      await answerCb(env, query.id, removed ? `Removed ${maskKey(removed)}` : 'Key not found');
-      const screen = await keysScreen(env);
-      const note = removed ? `🗑 Removed key ${maskKey(removed)}.\n\n` : '';
-      await editText(env, chatId, messageId, note + screen.text, { keyboard: screen.keyboard });
+      try {
+        const removed = await removeKeyAt(env, idx);
+        await answerCb(env, query.id, removed ? `Removed ${maskKey(removed)}` : 'Key not found');
+        const screen = await keysScreen(env);
+        // fix-02 v3: a stale/double-tapped button says so explicitly.
+        const note = removed
+          ? `🗑 Removed key ${maskKey(removed)}.\n\n`
+          : `ℹ️ No key at position ${idx + 1} anymore (already removed, or the list changed) — the current list is below.\n\n`;
+        await editText(env, chatId, messageId, note + screen.text, { keyboard: screen.keyboard });
+      } catch (e) {
+        const kvMsg = kvErrorMessage(e);
+        if (kvMsg) {
+          await answerCb(env, query.id, 'Key storage problem');
+          const screen = await keysScreen(env);
+          await editText(env, chatId, messageId, `${kvMsg}\n\n${screen.text}`, { keyboard: screen.keyboard });
+        } else { throw e; }
+      }
       break;
     }
     case 'kc': { // clear all keys (two taps: ask -> confirm)
       if (a1 === 'confirm') {
-        const n = await clearKeys(env);
-        await answerCb(env, query.id, `Cleared ${n} key${n === 1 ? '' : 's'}`);
-        const screen = await keysScreen(env);
-        await editText(env, chatId, messageId,
-          `🧹 Cleared all ${n} key${n === 1 ? '' : 's'}.\n\n` + screen.text,
-          { keyboard: screen.keyboard });
+        try {
+          const n = await clearKeys(env);
+          await answerCb(env, query.id, `Cleared ${n} key${n === 1 ? '' : 's'}`);
+          const screen = await keysScreen(env);
+          await editText(env, chatId, messageId,
+            `🧹 Cleared all ${n} key${n === 1 ? '' : 's'}.\n\n` + screen.text,
+            { keyboard: screen.keyboard });
+        } catch (e) {
+          const kvMsg = kvErrorMessage(e);
+          if (kvMsg) {
+            await answerCb(env, query.id, 'Key storage problem');
+            await editText(env, chatId, messageId, kvMsg);
+          } else { throw e; }
+        }
       } else {
         await answerCb(env, query.id);
         await editText(env, chatId, messageId,

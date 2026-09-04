@@ -129,12 +129,47 @@ async function gemini(env, payload) {
 }
 
 // fix-01-style specific failure feedback when the whole key pool is spent.
+// v3 fix-01: a KV key-storage failure takes precedence — it is LOUD and
+// specific, never collapsed into a generic "try a command" message.
 export function allFailedMessage(e) {
+  if (e && e.name === 'KeyPoolError') {
+    return `⚠️ Gemini key storage problem: ${e.message}\n\n` +
+      'This is an infrastructure fault, not a missing key. It has been logged.';
+  }
   if (e && e.allKeysFailed) {
     return '❌ Every configured Gemini API key failed for this request (quota exhausted or keys invalid). ' +
       'Add a fresh key via /menu → ⚙️ Settings → 🔑 Gemini API keys, then try again.';
   }
   return null;
+}
+
+// fix-03 v3: apply a natural-language edit instruction to a specific entry
+// (the tap-only edit entry point from the read view). Same reasoning path
+// as a Gemini-dispatched free-text edit: read + rewrite only this entry.
+export async function maybeApplyTapEdit(env, chatId, path, entryId, instruction, statusMessageId) {
+  const node = await readNode(env, path);
+  const entry = node && node.entries.find(e => e.id === entryId);
+  if (!entry) {
+    await editText(env, chatId, statusMessageId, 'That entry no longer exists.');
+    return;
+  }
+  const rewritten = await gemini(env, {
+    contents: [{ parts: [{ text:
+`Rewrite this notebook entry per the instruction. Output ONLY the new entry body (Markdown, keep any image embeds ![..](assets/..) unchanged unless the instruction says otherwise). No commentary.
+
+CURRENT ENTRY:
+${entry.body}
+
+INSTRUCTION:
+${instruction || 'improve clarity'}` }] }],
+    generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+  });
+  const body = String(rewritten).trim();
+  if (!body) { await editText(env, chatId, statusMessageId, '❌ Edit produced nothing.'); return; }
+  await updateEntry(env, path, entry.id, body);
+  const breadcrumb = path.split('/').join(' › ');
+  await editText(env, chatId, statusMessageId,
+    `✏️ Updated entry ${entry.id} in ${node.title} (${breadcrumb}):\n\n_${entry.date}_\n${body.slice(0, 400)}`);
 }
 
 function parseJsonLoose(text) {

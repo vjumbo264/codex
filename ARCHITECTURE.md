@@ -173,7 +173,12 @@ Worker **bindings**:
   provisioned by `scripts/predeploy.mjs` at deploy time. Holds the Gemini
   key pool (`gemini:keys`, a JSON array), the last-working key index
   (`gemini:last_ok_idx`, fix-04), and a once-a-day flag for the Telegram
-  command-menu sync.
+  command-menu sync. **Loud-failure contract (v3 fix-01):** every KV
+  read/parse/write failure in `keypool.js` throws a `KeyPoolError`
+  (`KV_MISSING` / `KV_READ_FAILED` / `KV_WRITE_FAILED`) that is surfaced
+  verbatim to the operator; every write is read-back-verified before
+  success is reported. A broken binding must never again look like
+  "zero keys configured".
 
 Worker **secrets** (set via Cloudflare API/dashboard, never in files):
 - `TELEGRAM_BOT_TOKEN` — Bot API calls.
@@ -209,6 +214,9 @@ detects it (two paths with same h8) and falls back to 12 hex chars.
 | op | meaning |
 |----|---------|
 | `h` | home screen (the app's front door, drawn by /start and /menu too) |
+| `nt` | new topic: ForceReply name prompt (from Home or Browse root) |
+| `an` | add note to a topic: ForceReply prompt (from the browse screen) |
+| `e` | edit an entry: ForceReply instruction prompt (from the read view) |
 | `s` | settings menu |
 | `sk` | settings → Gemini keys screen (masked list + add/remove/clear) |
 | `ka` | add keys: ForceReply prompt (newline-separated, many at once) |
@@ -230,9 +238,12 @@ detects it (two paths with same h8) and falls back to 12 hex chars.
 
 The bot is operated as an app, not by memorized commands. `/start` and
 `/menu` draw the **home screen**; from there every capability — Browse
-(the `b` tree), Read, Export (chooser → whole notebook or a topic),
-Delete confirmations, and **Settings → Gemini API keys** — is reachable by
-taps alone, arbitrarily deep. Every screen follows one pattern: a title
+(the `b` tree), **New topic**, **Add note here** (per topic, on the browse
+screen), Read, **Edit** and **Delete** buttons on every entry in the read
+view, Export (chooser → whole notebook or a topic), topic Delete
+confirmations, and **Settings → Gemini API keys** — is reachable by taps
+alone, arbitrarily deep. The only thing that inherently requires sending
+content is capture itself. Every screen follows one pattern: a title
 line, one button per action, and a trailing Back/Home row. Typed slash
 commands remain as an optional fast-path (`/topics`, `/read`, `/export`,
 `/delete`, `/new`, `/add`); the Telegram `/` command menu is kept in sync

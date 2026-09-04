@@ -4,7 +4,7 @@
   "round": "persistent-session-fix-v3",
   "fixes_complete": false,
   "current_fix": "fix-01",
-  "last_updated_utc": "2026-09-03",
+  "last_updated_utc": "2026-09-04",
   "prior_rounds_note": "The v2 round (see FIX_STATE_v2_archive.json and session_history below) ended with fixes_complete: true and 'verified live' claims, but the operator has since observed live failures (added keys invisible at request time; delete-after-add broken) proving the v2 verification was insufficient. v3 exists to root-cause and repair those failures for real, against the actual deployed bot.",
   "session_history": [
     {
@@ -46,6 +46,11 @@
       "session": 4,
       "date_utc": "2026-09-03",
       "summary": "v3 round seeded: FIX_STATE.json re-seeded with fix-01..fix-03 (all pending) per the v3 contract; v2 file preserved verbatim as FIX_STATE_v2_archive.json. Push-access proof commit for v3."
+    },
+    {
+      "session": 5,
+      "date_utc": "2026-09-04",
+      "summary": "fix-01..fix-03 implemented together. ROOT CAUSE of fix-01 confirmed via Cloudflare API: KV namespace CODEX_KV (f1ad0d7e...) IS correctly bound to the live Worker and gemini:keys holds 5 keys — the defect is keypool.js's silent-failure design: readPool caught errors and returned [], kv() returned null on missing binding, writePool never verified persistence, so 'KV broken' was indistinguishable from 'zero keys' and adds could be claimed successful without confirmation. FIX: KeyPoolError (KV_MISSING/KV_READ_FAILED/KV_WRITE_FAILED) thrown loudly on every KV failure; every write is read-back-verified (retry loop) before success; keysScreen, keys ForceReply flow, kr/kc callbacks, voice/media and Gemini dispatch all surface kvErrorMessage verbatim. fix-02: kr now reports 'no key at position N anymore' for stale/double-tapped buttons and every screen re-reads the pool fresh. fix-03: tap-only coverage — New topic (nt) from Home/Browse, Add note here (an) per topic on browse screens, per-entry Edit (e) and Delete (d) buttons on read-view pages (entries labeled by id suffix), edit flow runs the same Gemini rewrite path via maybeApplyTapEdit. Files: keypool.js (rewrite), ui.js, keyboards.js, read.js, callbacks.js, router.js, gemini.js, media.js, ARCHITECTURE.md. node --check passes on all. NEXT: deploy via this push, then live verification of fix-01 (add key + free-text), fix-02 (add two/remove both), fix-03 (full tap-only cycle)."
     }
   ],
   "fixes": [
@@ -54,29 +59,48 @@
       "name": "Root-cause and repair the Gemini key pool actually being empty in production despite keys being 'added' successfully",
       "status": "in_progress",
       "notes": "Observed live: after Settings → Keys → Add confirms a key was added, plain free-text requests still reply 'I need the Gemini API key to file free-form notes...'. The pool the dispatch code reads at request time is empty regardless of what the Add flow appeared to do. Investigation checklist (confirm which is actually true in the live environment, in order): (a) is the placeholder KV id 0000... still what the deployed Worker is bound to (check Actions build logs for the latest successful deploy, wrangler.toml at the commit that deploy built from, and whether predeploy.mjs genuinely ran in that pipeline); (b) is predeploy.mjs wired into the actual build command the Workers Build runs, or does it only exist in the repo; (c) did predeploy.mjs run but fail silently; (d) did it create the namespace but the id it stamped never took effect for the deployed build (Workers Builds build from a git checkout — a runner-side file edit cannot persist). Then fix the root cause properly: the end state must be a real working KV namespace permanently bound as CODEX_KV in what the live Worker actually deploys from, self-sufficient across future deploys, no manual dashboard steps ever again. Also make KV binding failures LOUD: getKeys/addKeys/writePool must never silently behave as 'zero keys configured' when the binding is missing/non-functional. VERIFY FOR REAL: add a key through Settings → Keys → Add on the live bot, then send a plain free-text message and confirm it is filed (or at minimum no longer produces the 'I need the Gemini API key' message).",
-      "files": [],
+      "files": [
+        "worker/src/keypool.js",
+        "worker/src/ui.js",
+        "worker/src/callbacks.js",
+        "worker/src/router.js",
+        "worker/src/gemini.js",
+        "worker/src/media.js",
+        "ARCHITECTURE.md"
+      ],
       "commits": [],
-      "tested": "not yet",
-      "concerns": "none yet"
+      "tested": "LIVE STATE INSPECTED via Cloudflare API (2026-09-04): namespace f1ad0d7e42c3456c8f3f241c61a7b3d8 'CODEX_KV' exists; live Worker codex-bot IS bound to it; KV contains gemini:keys (5 keys) + sys:cmd_synced. So binding/provisioning was NOT the failure — the silent-swallow design in keypool.js was. Code fix implemented; LIVE BOT RE-TEST (add key via Settings → Keys → Add, then free-text) still pending post-deploy.",
+      "concerns": "predeploy.mjs mechanism works via GitHub Actions workflow (secrets CLOUDFLARE_API_TOKEN/ACCOUNT_ID confirmed present) — kept as durable self-sufficient path; wrangler.toml placeholder is always replaced in-runner before wrangler deploy, so no committed-id needed."
     },
     {
       "id": "fix-02",
       "name": "Deleting a key immediately after adding it (and in general) must work reliably",
-      "status": "pending",
+      "status": "in_progress",
       "notes": "Operator-reported: removing a key right after adding one doesn't work. RETEST ONLY AFTER fix-01 is confirmed working live (a broken KV binding would itself explain it). If it still reproduces: check index/identity mismatch between what ui.js keysScreen renders and what removeKeyAt removes (stale keyboard after add → index computed against pre-add list → wrong key removed or silent out-of-range no-op); check whether the Keys screen re-renders fresh (new read of the current pool) every time it's shown after add/remove. Make remove-after-add and remove-twice-in-a-row both behave correctly and predictably (second removal should say the key/index no longer exists). VERIFY FOR REAL: add two keys in one message, tap-remove one, confirm screen shows only the remaining key, remove that too, confirm screen shows zero keys configured.",
-      "files": [],
+      "files": [
+        "worker/src/callbacks.js",
+        "worker/src/keypool.js"
+      ],
       "commits": [],
-      "tested": "not yet",
+      "tested": "Code fixed (stale-index now explicit; screens re-read fresh). Live retest pending (per contract, after fix-01 deploy).",
       "concerns": "none yet"
     },
     {
       "id": "fix-03",
       "name": "Complete UI coverage — every capability operable tap-only from the home interface",
-      "status": "pending",
+      "status": "in_progress",
       "notes": "Audit every capability in ARCHITECTURE.md and every command in commands.js / Gemini-dispatched action in gemini.js; confirm a genuine tap-only path from /start → home → drill-down for each. Specific known gaps to check: delete a note/entry or topic while browsing/reading (add tappable delete on browse + read screens with existing confirm step); edit an entry found while reading (tappable Edit → ForceReply for instruction, same as Gemini-dispatched edit path); create a new topic (tappable 'New topic' from home/browse via ForceReply); add a note to a specific existing topic found while browsing ('Add note here' per topic → ForceReply, same as /add flow); export reachable from home AND from every individual topic (branch export); anything else in ARCHITECTURE.md's capability list. Use the established ui.js pattern (screen structure, Back/Home navigation, ForceReply + pending.js tokens). Typed commands remain as fast-path. VERIFY FOR REAL: starting only from /start with no other command typed, perform a full cycle — create topic, add note via tap-only entry point, read, edit via tap-only edit, export just that topic, delete the note, delete the topic — entirely by tapping.",
-      "files": [],
+      "files": [
+        "worker/src/ui.js",
+        "worker/src/keyboards.js",
+        "worker/src/read.js",
+        "worker/src/callbacks.js",
+        "worker/src/router.js",
+        "worker/src/gemini.js",
+        "ARCHITECTURE.md"
+      ],
       "commits": [],
-      "tested": "not yet",
+      "tested": "All tap-only entry points implemented (nt/an/e ops + per-entry read buttons + existing b/r/x/X/d). Full tap-only cycle on live bot pending post-deploy.",
       "concerns": "none yet"
     }
   ],
