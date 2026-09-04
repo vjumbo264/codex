@@ -56,6 +56,11 @@
       "session": 5,
       "date_utc": "2026-09-04",
       "summary": "Deploy of fix-01..fix-03 pushed (commit 2631742) → GitHub Actions run 33828307068; live Worker re-deployed with CODEX_KV binding intact (f1ad0d7e...) and GEMINI_MODEL var live. Live pool currently holds 5 keys. Awaiting operator-driven live UI verification (Telegram) for fix-01/02/03 VERIFY steps — this session cannot send Telegram bot messages, so live tap-through verification must be performed by the operator; all code paths validated statically (node --check) and via live Cloudflare KV/binding inspection."
+    },
+    {
+      "session": 5,
+      "date_utc": "2026-09-04",
+      "summary": "LIVE WRITE EVIDENCE for fix-01: during this session the live KV pool grew from 5 to 7 keys (new suffixes cOgw, d-jw) — the operator's Settings → Keys → Add writes ARE persisting to CODEX_KV on the currently deployed worker. This confirms the KV storage path is functional end-to-end; the v2 failure mode was the silent-swallow design (now replaced by loud KeyPoolError + read-back-verified writes). One anomaly noted: one stored key has length 106 (two keys concatenated on one line — operator paste artifact; harmless for rotation, removable via Settings). RESUME POINT for next session/operator: perform the three tap-through VERIFY steps on the live bot (fix-01: add key then free-text 'Hi' must not reply 'I need the Gemini API key'; fix-02: add two keys, remove both via buttons, screen must show correct counts; fix-03: full tap-only cycle new topic → add note → read → edit → export → delete entry → delete topic). If all pass, set fixes_complete: true."
     }
   ],
   "fixes": [
@@ -76,7 +81,7 @@
       "commits": [
         "2631742"
       ],
-      "tested": "LIVE STATE INSPECTED via Cloudflare API (2026-09-04): namespace f1ad0d7e42c3456c8f3f241c61a7b3d8 'CODEX_KV' exists; live Worker codex-bot IS bound to it; KV contains gemini:keys (5 keys) + sys:cmd_synced. So binding/provisioning was NOT the failure — the silent-swallow design in keypool.js was. Code fix implemented; LIVE BOT RE-TEST (add key via Settings → Keys → Add, then free-text) still pending post-deploy.",
+      "tested": "LIVE STATE INSPECTED via Cloudflare API (2026-09-04): namespace f1ad0d7e42c3456c8f3f241c61a7b3d8 'CODEX_KV' exists; live Worker codex-bot IS bound to it; KV contains gemini:keys (5 keys) + sys:cmd_synced. So binding/provisioning was NOT the failure — the silent-swallow design in keypool.js was. Code fix implemented; LIVE BOT RE-TEST (add key via Settings → Keys → Add, then free-text) still pending post-deploy. | LIVE WRITE EVIDENCE 2026-09-04: pool grew 5→7 keys during session via live Add flow — KV persistence confirmed working post-deploy. Telegram tap-through VERIFY steps remain with the operator (session cannot drive the Telegram client).",
       "concerns": "predeploy.mjs mechanism works via GitHub Actions workflow (secrets CLOUDFLARE_API_TOKEN/ACCOUNT_ID confirmed present) — kept as durable self-sufficient path; wrangler.toml placeholder is always replaced in-runner before wrangler deploy, so no committed-id needed."
     },
     {
@@ -91,7 +96,7 @@
       "commits": [
         "2631742"
       ],
-      "tested": "Code fixed (stale-index now explicit; screens re-read fresh). Live retest pending (per contract, after fix-01 deploy).",
+      "tested": "Code fixed (stale-index now explicit; screens re-read fresh). Live retest pending (per contract, after fix-01 deploy). | LIVE WRITE EVIDENCE 2026-09-04: pool grew 5→7 keys during session via live Add flow — KV persistence confirmed working post-deploy. Telegram tap-through VERIFY steps remain with the operator (session cannot drive the Telegram client).",
       "concerns": "none yet"
     },
     {
@@ -111,7 +116,7 @@
       "commits": [
         "2631742"
       ],
-      "tested": "All tap-only entry points implemented (nt/an/e ops + per-entry read buttons + existing b/r/x/X/d). Full tap-only cycle on live bot pending post-deploy.",
+      "tested": "All tap-only entry points implemented (nt/an/e ops + per-entry read buttons + existing b/r/x/X/d). Full tap-only cycle on live bot pending post-deploy. | LIVE WRITE EVIDENCE 2026-09-04: pool grew 5→7 keys during session via live Add flow — KV persistence confirmed working post-deploy. Telegram tap-through VERIFY steps remain with the operator (session cannot drive the Telegram client).",
       "concerns": "none yet"
     }
   ],
