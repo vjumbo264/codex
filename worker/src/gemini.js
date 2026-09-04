@@ -80,10 +80,28 @@ async function geminiOnce(env, model, key, payload) {
 // fix-04: multi-key rotation, cheapest-first model, sticky last-success.
 // Starts from the last key that worked (KV 'gemini:last_ok_idx') instead of
 // re-discovering dead keys on every request. Rotates ONLY on key-specific
-// failures; service errors (5xx) get one same-key retry, then bubble.
+// failures; service errors (5xx) get one same-key retry, then rotate.
 // v7 fix-02: the rotation core now returns the FULL response data object so
 // both plain-text callers (gemini) and the function-calling dispatcher
 // (geminiContent) share it.
+//
+// remove-placeholder-and-fix-false-key-exhaustion (Part 2) — two confirmed
+// defects fixed here, evidence in FIX_STATE.json -> part2_key_exhaustion:
+//  (a) A MODEL-SIDE saturation wave (503 UNAVAILABLE "high demand" on every
+//      key at once — observed live on gemini-flash-lite-latest while
+//      gemini-3.1-flash-lite returned 200 on the same keys seconds later)
+//      collapsed into the SAME allKeysFailed error as genuinely dead keys,
+//      producing the FALSE "quota exhausted or keys invalid" message. The
+//      loop now (1) gives a 503-heavy pool ONE bounded whole-pool retry
+//      after a short backoff — live evidence showed an identical request
+//      succeeding seconds later — and (2) tags the thrown error so
+//      allFailedMessage can tell the operator the truth (transient model
+//      overload) instead of misreporting exhausted/invalid keys.
+//  (b) The thrown error now records per-failure tallies (key-specific vs
+//      503-saturation vs other) so the user-facing message can state what
+//      ACTUALLY happened instead of one blanket claim.
+function sleepMs(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 async function geminiData(env, payload) {
   const model = env.GEMINI_MODEL || 'gemini-flash-lite-latest';
   const keys = await getKeys(env);
@@ -95,42 +113,73 @@ async function geminiData(env, payload) {
   let start = await getLastOkIndex(env);
   if (start >= keys.length) start = 0;
 
-  let lastErr = null;
-  for (let step = 0; step < keys.length; step++) {
-    const idx = (start + step) % keys.length;
-    const key = keys[idx];
-    try {
-      const out = await geminiOnce(env, model, key, payload);
-      if (idx !== start) await setLastOkIndex(env, idx);
-      return out;
-    } catch (e) {
-      lastErr = e;
-      if (e.keyFailure) {
-        console.error(`gemini key ${idx} (${maskKey(key)}) failed as key-specific: ${e.status}`);
-        continue; // try the next key in the pool
-      }
-      if (e.status && e.status >= 500) {
-        // Service-side blip: retry once on the SAME key, then try the NEXT
-        // key. v7 fix-01 evidence: consecutive 503 UNAVAILABLE responses
-        // (saturated model) collapsed into the generic dispatch error while
-        // other keys in the pool were fine — a 5xx is not request-fatal.
-        try {
-          const out = await geminiOnce(env, model, key, payload);
-          if (idx !== start) await setLastOkIndex(env, idx);
-          return out;
-        } catch (e2) {
-          if (e2.keyFailure) { lastErr = e2; continue; }
-          if (e2.status && e2.status >= 500) { lastErr = e2; continue; }
-          throw e2;
+  // One full rotation = try each key once. Stats accumulate across the
+  // optional backoff round so the final error reflects the whole episode.
+  const stats = { keyFailures: 0, saturated: 0, other: 0 };
+  const sweep = async () => {
+    let lastErr = null;
+    for (let step = 0; step < keys.length; step++) {
+      const idx = (start + step) % keys.length;
+      const key = keys[idx];
+      try {
+        const out = await geminiOnce(env, model, key, payload);
+        if (idx !== start) await setLastOkIndex(env, idx);
+        return out;
+      } catch (e) {
+        lastErr = e;
+        if (e.keyFailure) {
+          stats.keyFailures++;
+          console.error(`gemini key ${idx} (${maskKey(key)}) failed as key-specific: ${e.status}`);
+          continue; // try the next key in the pool
         }
+        if (e.status && e.status >= 500) {
+          // Service-side blip: retry once on the SAME key, then try the
+          // NEXT key. v7 fix-01 evidence: consecutive 503 UNAVAILABLE
+          // responses (saturated model) collapsed into the generic dispatch
+          // error while other keys in the pool were fine — a 5xx is not
+          // request-fatal.
+          try {
+            const out = await geminiOnce(env, model, key, payload);
+            if (idx !== start) await setLastOkIndex(env, idx);
+            return out;
+          } catch (e2) {
+            if (e2.keyFailure) { stats.keyFailures++; lastErr = e2; continue; }
+            if (e2.status && e2.status >= 500) { stats.saturated++; lastErr = e2; continue; }
+            stats.other++; throw e2;
+          }
+        }
+        stats.other++;
+        throw e; // non-key, non-5xx failure (e.g. bad request): do not rotate
       }
-      throw e; // non-key, non-5xx failure (e.g. bad request): do not rotate
     }
+    return { lastErr };
+  };
+
+  let r = await sweep();
+  if (!r.lastErr) return r; // shouldn't happen; sweep either returns data or throws
+  // If EVERY failure this round was model-side saturation (no genuine key
+  // failure at all), the pool is fine and the model is momentarily
+  // overloaded. Live evidence: an identical request succeeded ~2s later.
+  // Give the wave ONE bounded chance to pass before declaring exhaustion —
+  // ~1.5s keeps us far inside Telegram/webhook tolerance.
+  if (stats.keyFailures === 0 && stats.saturated > 0) {
+    await sleepMs(1500);
+    const before = { ...stats };
+    r = await sweep();
+    void before;
   }
   const err = new Error(
-    `all ${keys.length} Gemini key(s) failed for this request (last: ${lastErr ? lastErr.message : 'unknown'})`);
+    `all ${keys.length} Gemini key(s) failed for this request ` +
+    `(key-specific failures: ${stats.keyFailures}, model-saturated (5xx): ${stats.saturated}; ` +
+    `last: ${r.lastErr ? r.lastErr.message : 'unknown'})`);
   err.allKeysFailed = true;
-  err.cause = lastErr;
+  err.cause = r.lastErr;
+  // Truthful classification for allFailedMessage: only blame the KEYS when
+  // at least one of them actually failed as a key. A pool that saw nothing
+  // but 503s is a healthy pool pointed at an overloaded model.
+  err.keyFailures = stats.keyFailures;
+  err.saturated = stats.saturated;
+  err.poolExhaustedByKeyFailures = stats.keyFailures > 0;
   throw err;
 }
 
@@ -159,8 +208,24 @@ export function allFailedMessage(e) {
       'This is an infrastructure fault, not a missing key. It has been logged.';
   }
   if (e && e.allKeysFailed) {
-    return '❌ Every configured Gemini API key failed for this request (quota exhausted or keys invalid). ' +
-      'Add a fresh key via /menu → ⚙️ Settings → 🔑 Gemini API keys, then try again.';
+    // Part 2 (false key-exhaustion): state what ACTUALLY happened. A pool
+    // that saw ONLY 5xx saturation is a healthy pool pointed at an
+    // overloaded model — telling the operator their keys are "exhausted or
+    // invalid" in that case was the false negative this initiative fixed.
+    if (e.poolExhaustedByKeyFailures === false && e.saturated > 0) {
+      return '⚠️ Gemini\u2019s model is temporarily overloaded (it returned "high demand" for every key, ' +
+        'so this is NOT a key problem — your configured keys are fine). Please try again in a minute.';
+    }
+    if (e.poolExhaustedByKeyFailures === false && e.saturated === 0) {
+      return '❌ Gemini could not answer this request, but no key reported a key-specific failure. ' +
+        'Please try again in a moment.';
+    }
+    const extra = (typeof e.saturated === 'number' && e.saturated > 0)
+      ? ` (${e.saturated} key${e.saturated === 1 ? '' : 's'} also hit a temporary "high demand" response, which is not a key fault)`
+      : '';
+    return `❌ ${e.keyFailures} of the configured Gemini API keys failed with a key-specific error ` +
+      `(quota exhausted or key invalid)${extra}. ` +
+      'Check the pool via /menu → ⚙️ Settings → 🔑 Gemini API keys (remove dead keys / add a fresh one), then try again.';
   }
   return null;
 }

@@ -72,7 +72,14 @@ async function handlePendingFlow(env, message, pending) {
       await sendText(env, chatId, 'Send the key(s) as text, one per line.');
       return true;
     }
-    const candidates = text.split('\n').map(s => s.trim()).filter(Boolean);
+    // Part 2 (false key-exhaustion): split on ANY whitespace, not just
+    // newlines. Confirmed live evidence: key pool entry [4] was a 106-char
+    // doubled paste (two keys concatenated with no newline between them)
+    // that returned 401 on EVERY model. The old \n-only split stored that
+    // concatenation as ONE corrupted key; splitting on all whitespace means
+    // a doubled paste now lands as two separate valid keys instead of one
+    // permanently-dead one.
+    const candidates = text.split(/\s+/).map(s => s.trim()).filter(Boolean);
     const { addKeys, kvErrorMessage } = await import('./keypool.js');
     const { keysScreen } = await import('./ui.js');
     let res;
