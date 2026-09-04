@@ -1,143 +1,52 @@
 {
   "project": "codex",
   "repo": "https://github.com/vjumbo264/codex",
-  "round": "persistent-session-fix-v4-deploy-verification",
+  "round": "persistent-session-fix-v5-live-export-and-gemini-dispatch",
   "fixes_complete": false,
   "current_fix": "fix-01",
   "last_updated_utc": "2026-09-04",
-  "prior_rounds_note": "The v2 round (see FIX_STATE_v2_archive.json and session_history below) ended with fixes_complete: true and 'verified live' claims, but the operator has since observed live failures (added keys invisible at request time; delete-after-add broken) proving the v2 verification was insufficient. v3 exists to root-cause and repair those failures for real, against the actual deployed bot.",
+  "prior_rounds_note": "v4 (see git history: DEPLOYMENT.md, probe commit a60afc8 reverted in 7ffa234) proved the deploy pipeline works end-to-end live (push to main -> GitHub Actions deploy.yml -> wrangler -> live Worker), and the operator has confirmed real live UI and live Gemini reasoning. This round (v5) is genuine feature bugs on a trustworthy pipeline: (1) PDF export fails on the live bot; (2) Gemini-dispatched tasks fail or return 'not found' (concrete operator instance: 'Delete that morning note' -> 'No entries found there.' even though a note existed under morning/random). Deploy verification is NOT re-opened unless something observed this round actively contradicts DEPLOYMENT.md.",
+  "live_state_at_round_start": {
+    "bot": "@mscodex_bot (id 8717684187), webhook https://codex-bot.vjumbo264.workers.dev/ confirmed live via getWebhookInfo 2026-09-04 (pending_update_count=0, allowed_updates message+callback_query)",
+    "live_notebook_tree_via_github_api": [
+      "notebook/morning/index.md  (title '# morning', zero entries)",
+      "notebook/morning/random/index.md  (title '# random', ONE entry: id 20260904-111139-jh2t, date 2026-09-04 · 11:11 UTC, body 'Create a new random note')"
+    ],
+    "evidence_standard": "Every fix: reproduce with real evidence against the live bot (TELEGRAM_BOT_TOKEN) and/or by running the Worker's own code against real live tree data -> literal error/response captured -> root cause confirmed -> fix -> deploy -> re-run the same reproduction live -> literal observed result recorded here."
+  },
   "session_history": [
     {
       "session": 1,
-      "date_utc": "2026-09-03",
-      "summary": "Seeded FIX_STATE.json with the four-fix contract (fix-01..fix-04). All fixes pending. Push-access proof commit."
-    },
-    {
-      "session": 1,
-      "date_utc": "2026-09-03",
-      "summary": "fix-01 complete: audited every Gemini-driven action path and made every completion message specific (topic title + breadcrumb + entry id for filing; topic + breadcrumb + entry id for edit/delete/move). Files: callbacks.js, gemini.js, media.js, commands.js, router.js."
-    },
-    {
-      "session": 1,
-      "date_utc": "2026-09-03",
-      "summary": "fix-02 complete: text-bearing document uploads (.txt/.md/.csv/.log/.json/.yaml/.xml + any text/* MIME) are accepted, downloaded, decoded (UTF-8 with BOM strip, size cap 256 KB), and routed. With caption -> caption acts as filing hint (fast-path add-to/new-topic patterns keep zero-Gemini path); without caption -> pure auto-file on file content. Explicit-path via /add flow uses zero Gemini quota. Files: media.js (new handleDocumentMessage + helpers), router.js (wire into both main and /add pending path)."
-    },
-    {
-      "session": 2,
-      "date_utc": "2026-09-03",
-      "summary": "fix-03 step A: KV key pool module (keypool.js) with legacy-secret auto-migration, wrangler KV binding, idempotent KV auto-provisioning in deploy workflow (scripts/predeploy.mjs), Telegram command-menu self-sync, model var switched to gemini-flash-lite-latest. Step B (tappable home/settings/keys UI) next."
-    },
-    {
-      "session": 2,
-      "date_utc": "2026-09-03",
-      "summary": "fix-03 complete: tappable home interface (home/export/settings/keys screens, one visual pattern, Back+Home everywhere, /start & /menu, interface-first /help, command-menu sync) + KV-backed Gemini key pool with legacy-secret auto-migration. Commits a0d5e99, 2952200."
-    },
-    {
-      "session": 2,
-      "date_utc": "2026-09-03",
-      "summary": "fix-04 complete: gemini-flash-lite-latest everywhere + multi-key rotation (sticky last-successful key, key-specific failure matching, same-key 5xx retry, specific all-keys-failed feedback). Commit e9cac4f. 10-scenario mocked rotation suite passes. Next: whole-round VERIFY."
-    },
-    {
-      "session": 3,
-      "date_utc": "2026-09-03",
-      "summary": "Whole-round VERIFY (v2) complete; fixes_complete: true at the time. Deploy evidence: Actions run 12 (e9cac4f) succeeded with CODEX_KV auto-provisioned (id f1ad0d7e..., zero dashboard) and GEMINI_MODEL=gemini-flash-lite-latest var live; worker live at codex-bot.vjumbo264.workers.dev (GET 200 'codex-bot ok', POST without webhook secret correctly 403). Live end-to-end evidence: commit 6747b91 (bot-authored 'new topic morning') landed AFTER the fix-04 deploy. Behavioral verification: full-stack harness (60/60 checks PASS). NOTE (v3): despite all of the above, the operator later observed on the live bot that keys added via Settings \u2192 Keys \u2192 Add were invisible at request time ('I need the Gemini API key...' for plain free-text), and delete-after-add misbehaved \u2014 so v2's 'verified live' did not reflect actual production behavior for the KV pool. v3 re-opens these areas."
-    },
-    {
-      "session": 4,
-      "date_utc": "2026-09-03",
-      "summary": "v3 round seeded: FIX_STATE.json re-seeded with fix-01..fix-03 (all pending) per the v3 contract; v2 file preserved verbatim as FIX_STATE_v2_archive.json. Push-access proof commit for v3."
-    },
-    {
-      "session": 5,
       "date_utc": "2026-09-04",
-      "summary": "fix-01..fix-03 implemented together. ROOT CAUSE of fix-01 confirmed via Cloudflare API: KV namespace CODEX_KV (f1ad0d7e...) IS correctly bound to the live Worker and gemini:keys holds 5 keys \u2014 the defect is keypool.js's silent-failure design: readPool caught errors and returned [], kv() returned null on missing binding, writePool never verified persistence, so 'KV broken' was indistinguishable from 'zero keys' and adds could be claimed successful without confirmation. FIX: KeyPoolError (KV_MISSING/KV_READ_FAILED/KV_WRITE_FAILED) thrown loudly on every KV failure; every write is read-back-verified (retry loop) before success; keysScreen, keys ForceReply flow, kr/kc callbacks, voice/media and Gemini dispatch all surface kvErrorMessage verbatim. fix-02: kr now reports 'no key at position N anymore' for stale/double-tapped buttons and every screen re-reads the pool fresh. fix-03: tap-only coverage \u2014 New topic (nt) from Home/Browse, Add note here (an) per topic on browse screens, per-entry Edit (e) and Delete (d) buttons on read-view pages (entries labeled by id suffix), edit flow runs the same Gemini rewrite path via maybeApplyTapEdit. Files: keypool.js (rewrite), ui.js, keyboards.js, read.js, callbacks.js, router.js, gemini.js, media.js, ARCHITECTURE.md. node --check passes on all. NEXT: deploy via this push, then live verification of fix-01 (add key + free-text), fix-02 (add two/remove both), fix-03 (full tap-only cycle)."
-    },
-    {
-      "session": 5,
-      "date_utc": "2026-09-04",
-      "summary": "Deploy of fix-01..fix-03 pushed (commit 2631742) \u2192 GitHub Actions run 33828307068; live Worker re-deployed with CODEX_KV binding intact (f1ad0d7e...) and GEMINI_MODEL var live. Live pool currently holds 5 keys. Awaiting operator-driven live UI verification (Telegram) for fix-01/02/03 VERIFY steps \u2014 this session cannot send Telegram bot messages, so live tap-through verification must be performed by the operator; all code paths validated statically (node --check) and via live Cloudflare KV/binding inspection."
-    },
-    {
-      "session": 5,
-      "date_utc": "2026-09-04",
-      "summary": "LIVE WRITE EVIDENCE for fix-01: during this session the live KV pool grew from 5 to 7 keys (new suffixes cOgw, d-jw) \u2014 the operator's Settings \u2192 Keys \u2192 Add writes ARE persisting to CODEX_KV on the currently deployed worker. This confirms the KV storage path is functional end-to-end; the v2 failure mode was the silent-swallow design (now replaced by loud KeyPoolError + read-back-verified writes). One anomaly noted: one stored key has length 106 (two keys concatenated on one line \u2014 operator paste artifact; harmless for rotation, removable via Settings). RESUME POINT for next session/operator: perform the three tap-through VERIFY steps on the live bot (fix-01: add key then free-text 'Hi' must not reply 'I need the Gemini API key'; fix-02: add two keys, remove both via buttons, screen must show correct counts; fix-03: full tap-only cycle new topic \u2192 add note \u2192 read \u2192 edit \u2192 export \u2192 delete entry \u2192 delete topic). If all pass, set fixes_complete: true."
-    },
-    {
-      "session": 6,
-      "date_utc": "2026-09-04",
-      "summary": "v4 deploy verification: D1-D5 complete with direct evidence (live deployment 02:22:52Z post-2631742; webhook URL matches; Actions+wrangler is the only deploy path; probe commit a60afc8 confirmed live at 02:34:29Z via GET marker). Root cause = verification blind spot, not a broken pipeline; documented in DEPLOYMENT.md."
+      "summary": "v5 round seeded: FIX_STATE.json replaced with the v5 contract's two fixes (fix-01 PDF export fails; fix-02 Gemini-dispatched tasks fail/'not found'), both pending. Prior v4 state content superseded; v2 archive (FIX_STATE_v2_archive.json) untouched. Live tree snapshot recorded (morning, morning/random with one real entry 20260904-111139-jh2t)."
     }
   ],
   "fixes": [
     {
       "id": "fix-01",
-      "name": "Root-cause and repair the Gemini key pool actually being empty in production despite keys being 'added' successfully",
-      "status": "in_progress",
-      "notes": "Observed live: after Settings \u2192 Keys \u2192 Add confirms a key was added, plain free-text requests still reply 'I need the Gemini API key to file free-form notes...'. The pool the dispatch code reads at request time is empty regardless of what the Add flow appeared to do. Investigation checklist (confirm which is actually true in the live environment, in order): (a) is the placeholder KV id 0000... still what the deployed Worker is bound to (check Actions build logs for the latest successful deploy, wrangler.toml at the commit that deploy built from, and whether predeploy.mjs genuinely ran in that pipeline); (b) is predeploy.mjs wired into the actual build command the Workers Build runs, or does it only exist in the repo; (c) did predeploy.mjs run but fail silently; (d) did it create the namespace but the id it stamped never took effect for the deployed build (Workers Builds build from a git checkout \u2014 a runner-side file edit cannot persist). Then fix the root cause properly: the end state must be a real working KV namespace permanently bound as CODEX_KV in what the live Worker actually deploys from, self-sufficient across future deploys, no manual dashboard steps ever again. Also make KV binding failures LOUD: getKeys/addKeys/writePool must never silently behave as 'zero keys configured' when the binding is missing/non-functional. VERIFY FOR REAL: add a key through Settings \u2192 Keys \u2192 Add on the live bot, then send a plain free-text message and confirm it is filed (or at minimum no longer produces the 'I need the Gemini API key' message).",
-      "files": [
-        "worker/src/keypool.js",
-        "worker/src/ui.js",
-        "worker/src/callbacks.js",
-        "worker/src/router.js",
-        "worker/src/gemini.js",
-        "worker/src/media.js",
-        "ARCHITECTURE.md"
-      ],
-      "commits": [
-        "2631742"
-      ],
-      "tested": "LIVE STATE INSPECTED via Cloudflare API (2026-09-04): namespace f1ad0d7e42c3456c8f3f241c61a7b3d8 'CODEX_KV' exists; live Worker codex-bot IS bound to it; KV contains gemini:keys (5 keys) + sys:cmd_synced. So binding/provisioning was NOT the failure \u2014 the silent-swallow design in keypool.js was. Code fix implemented; LIVE BOT RE-TEST (add key via Settings \u2192 Keys \u2192 Add, then free-text) still pending post-deploy. | LIVE WRITE EVIDENCE 2026-09-04: pool grew 5\u21927 keys during session via live Add flow \u2014 KV persistence confirmed working post-deploy. Telegram tap-through VERIFY steps remain with the operator (session cannot drive the Telegram client).",
-      "concerns": "predeploy.mjs mechanism works via GitHub Actions workflow (secrets CLOUDFLARE_API_TOKEN/ACCOUNT_ID confirmed present) \u2014 kept as durable self-sufficient path; wrangler.toml placeholder is always replaced in-runner before wrangler deploy, so no committed-id needed."
+      "name": "PDF export fails — reproduce, root-cause, fix, validate live",
+      "status": "pending",
+      "notes": "Operator-reported: tapping Export PDF fails. Plan: (a) run exportPdf/doExport code path locally against the REAL live tree (morning, morning/random + its real entry) using the same GitHub-read logic; (b) actually trigger /export all and /export morning on the live bot via Bot API sendMessage from this session; capture the literal error or malformed output. Candidates to check only once a real symptom exists: image embedding via rawUrl fetch; deeply nested/unusual entries; sendDocumentBytes multipart correctness and Telegram's actual rejection reason; whether it's scope-specific (whole notebook vs one topic).",
+      "files": ["worker/src/export.js", "worker/src/pdf.js", "worker/src/telegram.js"],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
     },
     {
       "id": "fix-02",
-      "name": "Deleting a key immediately after adding it (and in general) must work reliably",
-      "status": "in_progress",
-      "notes": "Operator-reported: removing a key right after adding one doesn't work. RETEST ONLY AFTER fix-01 is confirmed working live (a broken KV binding would itself explain it). If it still reproduces: check index/identity mismatch between what ui.js keysScreen renders and what removeKeyAt removes (stale keyboard after add \u2192 index computed against pre-add list \u2192 wrong key removed or silent out-of-range no-op); check whether the Keys screen re-renders fresh (new read of the current pool) every time it's shown after add/remove. Make remove-after-add and remove-twice-in-a-row both behave correctly and predictably (second removal should say the key/index no longer exists). VERIFY FOR REAL: add two keys in one message, tap-remove one, confirm screen shows only the remaining key, remove that too, confirm screen shows zero keys configured.",
-      "files": [
-        "worker/src/callbacks.js",
-        "worker/src/keypool.js"
-      ],
-      "commits": [
-        "2631742"
-      ],
-      "tested": "Code fixed (stale-index now explicit; screens re-read fresh). Live retest pending (per contract, after fix-01 deploy). | LIVE WRITE EVIDENCE 2026-09-04: pool grew 5\u21927 keys during session via live Add flow \u2014 KV persistence confirmed working post-deploy. Telegram tap-through VERIFY steps remain with the operator (session cannot drive the Telegram client).",
-      "concerns": "none yet"
-    },
-    {
-      "id": "fix-03",
-      "name": "Complete UI coverage \u2014 every capability operable tap-only from the home interface",
-      "status": "in_progress",
-      "notes": "Audit every capability in ARCHITECTURE.md and every command in commands.js / Gemini-dispatched action in gemini.js; confirm a genuine tap-only path from /start \u2192 home \u2192 drill-down for each. Specific known gaps to check: delete a note/entry or topic while browsing/reading (add tappable delete on browse + read screens with existing confirm step); edit an entry found while reading (tappable Edit \u2192 ForceReply for instruction, same as Gemini-dispatched edit path); create a new topic (tappable 'New topic' from home/browse via ForceReply); add a note to a specific existing topic found while browsing ('Add note here' per topic \u2192 ForceReply, same as /add flow); export reachable from home AND from every individual topic (branch export); anything else in ARCHITECTURE.md's capability list. Use the established ui.js pattern (screen structure, Back/Home navigation, ForceReply + pending.js tokens). Typed commands remain as fast-path. VERIFY FOR REAL: starting only from /start with no other command typed, perform a full cycle \u2014 create topic, add note via tap-only entry point, read, edit via tap-only edit, export just that topic, delete the note, delete the topic \u2014 entirely by tapping.",
-      "files": [
-        "worker/src/ui.js",
-        "worker/src/keyboards.js",
-        "worker/src/read.js",
-        "worker/src/callbacks.js",
-        "worker/src/router.js",
-        "worker/src/gemini.js",
-        "ARCHITECTURE.md"
-      ],
-      "commits": [
-        "2631742"
-      ],
-      "tested": "All tap-only entry points implemented (nt/an/e ops + per-entry read buttons + existing b/r/x/X/d). Full tap-only cycle on live bot pending post-deploy. | LIVE WRITE EVIDENCE 2026-09-04: pool grew 5\u21927 keys during session via live Add flow \u2014 KV persistence confirmed working post-deploy. Telegram tap-through VERIFY steps remain with the operator (session cannot drive the Telegram client).",
-      "concerns": "none yet"
+      "name": "Gemini-dispatched tasks fail or return 'not found' — reproduce, root-cause, fix, validate live",
+      "status": "pending",
+      "notes": "Operator-reported: 'When I ask AI to do some tasks it fails or says not found.' Concrete prior instance: 'Delete that morning note' -> 'No entries found there.' while a note existed under morning/random (the entry lives one level deeper than the literal 'morning' topic). Reproduction order: (1) natural imprecise reference to real live content via the live bot and/or direct dispatch-path simulation; (2) exact unambiguous reference (literal path / entry id) to isolate resolution-matching vs dispatch-mechanism; (3) at least one other dispatched task type beyond delete (edit, natural-language read). Code-reading hypothesis to confirm/refute with evidence ONLY: classifyAndDispatch resolves intent.path via resolvePath('morning') -> resolves to the EMPTY parent node 'morning' -> handleEntryAction reads morning (zero entries) -> 'No entries found there.' without ever descending into morning/random; handleEntryAction also never searches other nodes when the resolved node is empty, and never searches the whole tree when resolution returns null. Fix must make correctly-referenced live content resolve (descend/search deeper, use entry content + recency as signal, search whole tree before reporting not-found) — NOT weaken 'not found' reporting.",
+      "files": ["worker/src/gemini.js", "worker/src/router.js"],
+      "commits": [],
+      "tested": "",
+      "concerns": ""
     }
   ],
   "verification": {
     "date_utc": null,
-    "notes": "Whole-round VERIFY pending: fix-01, fix-02, fix-03 individual VERIFY steps must all pass against the actual live deployed bot, in order (fix-01 first). After all fixes deployed: re-send one plain free-text note with no explicit destination and confirm correct completion feedback naming the actual topic (regression check against v2's fix-01). Only then mark fixes_complete: true, commit, push.",
+    "notes": "Whole-round VERIFY pending: re-confirm fix-01 and fix-02 pass their own reproduction steps freshly after ALL changes are deployed; spot-check one export + one Gemini-dispatched action for regressions against prior-round behavior; only then mark fixes_complete: true.",
     "live_evidence": []
   },
-  "deploy_verification": {
-    "status": "complete",
-    "evidence": {
-      "D1": "Cloudflare API 2026-09-04T02:2xZ: live deployment id 4c7c4bdf created 2026-09-04T02:22:52Z (version 8efb5850, 100%), AFTER commit 2631742 (02:06:45Z). scripts/content readback blocked for token auth (error 10405) \u2014 source-diff via content download not possible; deployments API + live GET used instead.",
-      "D2": "getWebhookInfo 2026-09-04: url=https://codex-bot.vjumbo264.workers.dev/ pending_update_count=0 \u2014 matches the codex-bot Worker inspected in D1. No mismatch.",
-      "D3": "No Workers Builds integration: every deployment source=wrangler; GitHub Actions deploy.yml triggers on push to main (worker/** paths); runs 33828307068(2631742),33828896026(0715dca),33829026969(bf384f1),33829562667(a60afc8) all completed success, one per push.",
-      "D4": "Probe commit a60afc8 (GET marker probe-v4-0904a) pushed 2026-09-04T02:27:00Z \u2192 new CF deployment 02:34Z \u2192 live GET returned \"codex-bot ok \u00b7 probe-v4-0904a\" at 2026-09-04T02:34:29Z. Positive end-to-end proof.",
-      "D5": "Root cause: not a pipeline defect \u2014 a verification blind spot (no build marker on the public GET path + scripts/content unreadable with token auth). Fix: DEPLOYMENT.md documents mechanism + probe procedure; probe marker commit proves pushes go live."
-    }
-  }
+  "deploy_verification_carryover": "v4 deploy_verification complete (see DEPLOYMENT.md + git history around b63f198/a60afc8/7ffa234). Pipeline trusted this round; do not re-open unless contradicted."
 }
