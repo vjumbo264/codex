@@ -4,7 +4,7 @@
   "round": "persistent-session-remove-placeholder-and-fix-false-key-exhaustion",
   "fixes_complete": false,
   "current_fix": null,
-  "last_updated_utc": "2026-09-04T15:44:29Z",
+  "last_updated_utc": "2026-09-04T15:56:34Z",
   "round_summary": "Root cause CONFIRMED with captured evidence (fix-01): the old classifyAndDispatch demanded 'ONLY strict JSON' and hand-parsed it; for 'Hi tell me something abstract' the live model returned a TRUNCATED JSON fragment {'action':'note','text':' (300-token cap, thinking tokens eating the budget) which parseJsonLoose rejected with 'no json in response'; for the two delete inputs the pool's keys hit transient 503 UNAVAILABLE which the one-shot same-key retry let bubble. ALL failure categories collapsed into the single outer catch -> the identical generic 'I could not handle that' the operator saw on all three inputs. fix-02 rebuilt dispatch on Gemini NATIVE function-calling following the Compass pattern (motionssalt/compass src/ai/agent.ts): real functionDeclarations, bounded multi-round loop, plain-text-with-no-function-call is the valid conversational outcome, distinct friendly fallbacks at every failure point, one-round resolution for explicit requests, deletes still confirm-gated. fix-03 added a declared delete_everything tool + root-capable deleteNodeTree + D:root callback branch. fix-04 verified exact-name topic delete resolves live.",
   "session_history": [
     {
@@ -61,6 +61,11 @@
       "session": 4,
       "date_utc": "2026-09-04",
       "summary": "PART 2 FIX IMPLEMENTED: gemini.js geminiData gains a bounded single whole-pool retry after 1500ms backoff when a round saw ONLY 5xx saturation and zero key-specific failures; allKeysFailed error now carries keyFailures/saturated/poolExhaustedByKeyFailures; allFailedMessage renders a truthful saturation message (keys are fine, model overloaded) instead of the false quota-exhausted/invalid claim, and an accurate counted message for genuine key failures. router.js keys-flow paste parsing now splits on all whitespace so doubled-paste concatenations (the confirmed corrupted 106-char key[4]) can never enter the pool as one dead key. isKeyFailure untouched."
+    },
+    {
+      "session": 4,
+      "date_utc": "2026-09-04",
+      "summary": "PART 2 TESTS + LIVE VERIFICATION BOTH PARTS COMPLETE: false-key-exhaustion.test.mjs 24/24 (stubbed Gemini API reproducing every confirmed scenario); silent-nonresponse.test.mjs 17/17 still passing (41/41 total). Live verify Part 1 PASS (one direct sendMessage, zero placeholders, zero edit cycles, real pool/tree/API). Live verify Part 2 PASS on the production model (503 wave + pre-existing corrupted key[4] absorbed, real reply delivered). Pre-existing corrupted key[4] (106-char doubled paste) and the saturated GEMINI_MODEL=gemini-flash-lite-latest alias remain as operator-facing notes (production data/config not mutated from a session)."
     }
   ],
   "fixes": [
@@ -147,22 +152,28 @@
     "cleanup": "deleted new node plants (1 files) — live tree restored to morning, morning/random + entry jh2t"
   },
   "initiative": "remove-placeholder-and-fix-false-key-exhaustion",
-  "current_step": "part2-fix-complete",
+  "current_step": "live-verification-complete",
   "live_verification": {
-    "part1_performed": false,
-    "part1_result": "",
-    "part2_performed": false,
-    "part2_result": ""
+    "part1_performed": true,
+    "part1_result": "PASS — worker/test/live-verify-part1.mjs executed the REAL routeFreeText() against the REAL live KV key pool (7 keys), the REAL live notebook tree (real GITHUB token), and the REAL Gemini API (gemini-flash-latest, isolating Part 1 from the lite alias saturation), with the Telegram Bot API intercepted for capture. Input: \"Hi — what do you think about the color of Tuesday?\" -> captured telegram calls: EXACTLY ONE sendMessage (len=369, \"Tuesday often feels like a soft, muted yellow or perhaps a g…\"), ZERO placeholder-pattern messages, ZERO editMessageText edit cycles. Compass one-message shape confirmed live. Code-level check: no sendText/editText placeholder call remains in the dispatch path (grep confirms only purpose-named interim messages for genuinely long operations: PDF render, entry edit).",
+    "part2_performed": true,
+    "part2_result": "PASS — worker/test/live-verify-part2.mjs executed the REAL post-fix geminiData() rotation loop against the REAL live KV key pool and REAL Gemini API on the PRODUCTION CONFIGURED model gemini-flash-lite-latest. Captured attempts: 8x 503 UNAVAILABLE \"high demand\" (four healthy keys, attempt + same-key retry each), 1x 401 UNAUTHENTICATED on the pre-existing corrupted doubled-paste key[4] (106 chars), then 200 OK on key[5] — RESULT: SUCCESS, model replied \"OK\". Under the pre-fix code this exact sequence collapsed into the false \"quota exhausted or keys invalid\" error (prior session captured that exact throw); post-fix the rotation routes around the dead key and absorbs the live 503 wave. The error path itself is covered deterministically by the regression suite (truthful saturation message asserted)."
   },
-  "tests_added": [],
-  "full_suite_passing": false,
+  "tests_added": [
+    "worker/test/false-key-exhaustion.test.mjs (24 assertions, all passing): 503-wave absorption via bounded whole-pool backoff retry; persistent-saturation truthful message (must NOT claim quota-exhausted/invalid); genuine all-dead pool keeps accurate counted key-failure message; mixed pool rotates past dead key AND absorbs 503 wave; 429 immediate rotation unchanged; no-key-failure/no-saturation honest generic; KeyPoolError precedence; addKeys doubled-paste/whitespace hygiene + idempotency.",
+    "worker/test/live-verify-part1.mjs (live harness: placeholder-free dispatch proof)",
+    "worker/test/live-verify-part2.mjs (live harness: real pool + real API rotation proof)"
+  ],
+  "full_suite_passing": true,
   "human_review_items": [
-    "DEPLOY (still pending from prior initiative): the fix-silent-nonresponse code is committed but was never wrangler-deployed from a session; this session has CLOUDFLARE_API_TOKEN and will attempt deploy after both parts land."
+    "DEPLOY: pushes 697fbb5 and 6b68945 touch worker/** so the GitHub Actions deploy workflow should have deployed them; verify via the deployments API / GET probe this session.",
+    "OPERATOR: remove the corrupted doubled-paste key (Settings -> Gemini API keys, the entry shown with doubled length) or re-paste key #5; the pool currently holds 6 valid keys + 1 dead concatenation.",
+    "OPERATOR: GEMINI_MODEL=gemini-flash-lite-latest is experiencing repeated pool-wide 503 saturation waves; consider gemini-flash-latest or gemini-3.1-flash-lite (both returned 200 on the same keys during evidence capture). The code now absorbs transient waves, but a healthy model removes the delay entirely."
   ],
   "resume_from": {
-    "file": "worker/src/gemini.js",
-    "component": "geminiData/allFailedMessage",
-    "next_operation": "Part 2 FIX: (1) bounded retry-with-backoff on 503 before declaring pool exhaustion; (2) truthful error message distinguishing model-saturation 503s from genuine key failures; (3) addKeys hygiene: split pasted input on whitespace too so doubled-paste keys never enter the pool; (4) regression tests reproducing the confirmed misclassification; (5) operator-facing notes: switch GEMINI_MODEL to a healthy model, remove corrupted key [4]."
+    "file": "FIX_STATE.json",
+    "component": "deploy-verification",
+    "next_operation": "Confirm the GitHub Actions deploy for HEAD landed on codex-bot (deployments API + GET probe), then mark initiative fixes_complete=true."
   },
   "prior_initiatives": [
     {

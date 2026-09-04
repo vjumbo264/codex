@@ -101,6 +101,9 @@ async function geminiOnce(env, model, key, payload) {
 //      503-saturation vs other) so the user-facing message can state what
 //      ACTUALLY happened instead of one blanket claim.
 function sleepMs(ms) { return new Promise(r => setTimeout(r, ms)); }
+// Test hook: regression tests shrink the Part-2 backoff to 1ms so the
+// suite stays instant. Production code never touches this.
+let SATURATION_BACKOFF_MS = 1500;
 
 async function geminiData(env, payload) {
   const model = env.GEMINI_MODEL || 'gemini-flash-lite-latest';
@@ -157,16 +160,16 @@ async function geminiData(env, payload) {
 
   let r = await sweep();
   if (!r.lastErr) return r; // shouldn't happen; sweep either returns data or throws
-  // If EVERY failure this round was model-side saturation (no genuine key
-  // failure at all), the pool is fine and the model is momentarily
-  // overloaded. Live evidence: an identical request succeeded ~2s later.
-  // Give the wave ONE bounded chance to pass before declaring exhaustion —
-  // ~1.5s keeps us far inside Telegram/webhook tolerance.
-  if (stats.keyFailures === 0 && stats.saturated > 0) {
-    await sleepMs(1500);
-    const before = { ...stats };
+  // Whenever a round saw ANY model-side saturation, the pool may be fine
+  // and the model momentarily overloaded. Live evidence: an identical
+  // request succeeded ~2s later. Give the wave ONE bounded chance to pass
+  // before declaring exhaustion — ~1.5s keeps us far inside Telegram/
+  // webhook tolerance. Genuinely dead keys just fail fast again (cheap);
+  // the tallies still record them so the final message stays truthful.
+  if (stats.saturated > 0) {
+    await sleepMs(SATURATION_BACKOFF_MS);
     r = await sweep();
-    void before;
+    if (!r.lastErr) return r; // the wave passed — deliver the success
   }
   const err = new Error(
     `all ${keys.length} Gemini key(s) failed for this request ` +
@@ -876,3 +879,12 @@ Reply with ONLY strict JSON: {"path":"<existing path with > separators>","captio
 }
 
 export { gemini, parseJsonLoose, classifyAndDispatch, deliver };
+
+// Test-only surface (worker/test/false-key-exhaustion.test.mjs): lets the
+// regression suite drive the REAL geminiData rotation loop against a
+// stubbed Gemini API and shrink the saturation backoff so tests stay fast.
+// Never used by production code paths.
+export const __testables = {
+  geminiData,
+  setBackoffForTests(ms) { SATURATION_BACKOFF_MS = ms; },
+};
