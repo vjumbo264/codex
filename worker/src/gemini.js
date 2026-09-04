@@ -68,21 +68,23 @@ async function geminiOnce(env, model, key, payload) {
     throw err;
   }
   const data = await res.json();
-  const parts = data.candidates && data.candidates[0] && data.candidates[0].content &&
-    data.candidates[0].content.parts;
-  if (!parts) {
+  const content = data.candidates && data.candidates[0] && data.candidates[0].content;
+  if (!content) {
     const err = new Error('Gemini: no content');
     err.keyFailure = false;
     throw err;
   }
-  return parts.map(p => p.text || '').join('');
+  return data; // full response: function-calling callers need the raw parts
 }
 
 // fix-04: multi-key rotation, cheapest-first model, sticky last-success.
 // Starts from the last key that worked (KV 'gemini:last_ok_idx') instead of
 // re-discovering dead keys on every request. Rotates ONLY on key-specific
 // failures; service errors (5xx) get one same-key retry, then bubble.
-async function gemini(env, payload) {
+// v7 fix-02: the rotation core now returns the FULL response data object so
+// both plain-text callers (gemini) and the function-calling dispatcher
+// (geminiContent) share it.
+async function geminiData(env, payload) {
   const model = env.GEMINI_MODEL || 'gemini-flash-lite-latest';
   const keys = await getKeys(env);
   if (!keys.length) {
@@ -108,13 +110,17 @@ async function gemini(env, payload) {
         continue; // try the next key in the pool
       }
       if (e.status && e.status >= 500) {
-        // Service-side blip: retry once on the SAME key, then bubble.
+        // Service-side blip: retry once on the SAME key, then try the NEXT
+        // key. v7 fix-01 evidence: consecutive 503 UNAVAILABLE responses
+        // (saturated model) collapsed into the generic dispatch error while
+        // other keys in the pool were fine — a 5xx is not request-fatal.
         try {
           const out = await geminiOnce(env, model, key, payload);
           if (idx !== start) await setLastOkIndex(env, idx);
           return out;
         } catch (e2) {
           if (e2.keyFailure) { lastErr = e2; continue; }
+          if (e2.status && e2.status >= 500) { lastErr = e2; continue; }
           throw e2;
         }
       }
@@ -126,6 +132,22 @@ async function gemini(env, payload) {
   err.allKeysFailed = true;
   err.cause = lastErr;
   throw err;
+}
+
+// Plain-text callers (transcription, auto-file decisions, entry rewrites):
+// join all text parts — the legacy contract.
+async function gemini(env, payload) {
+  const data = await geminiData(env, payload);
+  const parts = (data.candidates && data.candidates[0] && data.candidates[0].content &&
+    data.candidates[0].content.parts) || [];
+  return parts.map(p => p.text || '').join('');
+}
+
+// v7 fix-02: function-calling callers get the raw model content
+// ({ role, parts }) so functionCall parts survive intact.
+async function geminiContent(env, payload) {
+  const data = await geminiData(env, payload);
+  return (data.candidates && data.candidates[0] && data.candidates[0].content) || null;
 }
 
 // fix-01-style specific failure feedback when the whole key pool is spent.
@@ -238,7 +260,11 @@ or, to create a new topic: {"title": "<short topic title>", "parent": "<existing
 NOTE TO FILE:
 ${noteText}` }],
     }],
-    generationConfig: { temperature: 0.2, maxOutputTokens: 256 },
+    // v7: 256 was not enough headroom on newer Gemini models — thinking
+    // tokens share this budget, so the JSON decision could be truncated
+    // mid-string (captured live: "no json in response" from an unfinished
+    // `{"action":"note","text":"` fragment).
+    generationConfig: { temperature: 0.2, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 512 } },
   });
   const decision = parseJsonLoose(raw);
   let nodePath = null;
@@ -336,88 +362,262 @@ export async function routeFreeText(env, message, text, opts = {}) {
   } catch (e) {
     console.error('gemini dispatch failed', e);
     await editText(env, chatId, status.message_id,
-      allFailedMessage(e) || '❌ I could not handle that. Try a command from /help.');
+      allFailedMessage(e) || '⚠️ The AI dispatcher hiccuped on that message. Try again in a moment, or use a command from /help.');
   }
 }
 
-// ---- case 4 + task-08: minimal intent classification ----------------------
+// ---- case 4 (v7 fix-02): native function-calling dispatch ------------------
+//
+// Replaces the v1-v6 "ask for ONLY strict JSON and hand-parse it" classifier.
+// That design had NO valid shape for non-actionable input, so a prose reply,
+// a markdown fence, a truncated JSON fragment, or a transient API error all
+// collapsed into the same opaque generic error (v7 fix-01 captured evidence).
+// Codex now declares its actions as real Gemini functionDeclarations — the
+// pattern proven in production by the operator's Compass bot
+// (src/ai/agent.ts + tools.ts + toolExecutor.ts): "no function call, just
+// talk to the user" is a first-class API outcome, which naturally covers
+// arbitrary free text.
 
-async function classifyAndDispatch(env, chatId, text, statusMessageId) {
-  const tree = await treeListing(env);
-  const raw = await gemini(env, {
-    contents: [{
-      parts: [{ text:
-`You are the dispatcher for a Telegram notebook bot. The notebook tree:
+const DISPATCH_TOOLS = [{
+  functionDeclarations: [
+    {
+      name: 'file_note',
+      description: 'Save a new note into the notebook (auto-filed to the best topic). Use whenever the user gives you content to remember, save, jot down, or store — including when they just state a fact, idea, reminder or task with no explicit command.',
+      parameters: {
+        type: 'OBJECT',
+        properties: { text: { type: 'STRING', description: 'The full note content to save.' } },
+        required: ['text'],
+      },
+    },
+    {
+      name: 'read_topic',
+      description: 'Show/read the entries of a topic the user asks to see.',
+      parameters: {
+        type: 'OBJECT',
+        properties: { path: { type: 'STRING', description: 'Topic path, slash-separated (e.g. "morning/random"). Use the tree listing.' } },
+        required: ['path'],
+      },
+    },
+    {
+      name: 'export_pdf',
+      description: 'Export a topic (or the whole notebook) as a PDF document.',
+      parameters: {
+        type: 'OBJECT',
+        properties: { path: { type: 'STRING', description: 'Topic path, or the word "all" for the entire notebook.' } },
+        required: ['path'],
+      },
+    },
+    {
+      name: 'delete_topic',
+      description: 'Delete ONE named topic and everything inside it. The user always confirms via inline buttons before anything is removed.',
+      parameters: {
+        type: 'OBJECT',
+        properties: { path: { type: 'STRING', description: 'Topic path, slash-separated.' } },
+        required: ['path'],
+      },
+    },
+    {
+      name: 'delete_everything',
+      description: 'Delete the ENTIRE notebook — every topic and every entry. Use ONLY for explicit whole-notebook requests like "delete all topics", "wipe my notebook", "delete everything". The user always confirms via inline buttons before anything is removed.',
+      parameters: { type: 'OBJECT', properties: {} },
+    },
+    {
+      name: 'delete_entry',
+      description: 'Delete ONE specific entry inside a topic. The user always confirms via inline buttons first.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          path: { type: 'STRING', description: 'Topic path holding the entry. Resolve to the DEEPEST node whose entries actually match the description.' },
+          entry_hint: { type: 'STRING', description: 'What the entry says / how the user referred to it.' },
+        },
+        required: ['path', 'entry_hint'],
+      },
+    },
+    {
+      name: 'edit_entry',
+      description: "Rewrite/modify one existing entry per the user's instruction.",
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          path: { type: 'STRING', description: 'Topic path holding the entry (deepest matching node).' },
+          entry_hint: { type: 'STRING', description: 'Which entry the user means.' },
+          instruction: { type: 'STRING', description: 'How to change it.' },
+        },
+        required: ['path', 'entry_hint', 'instruction'],
+      },
+    },
+    {
+      name: 'browse_topics',
+      description: 'Show the interactive topic browser (buttons).',
+      parameters: { type: 'OBJECT', properties: {} },
+    },
+    {
+      name: 'help',
+      description: 'Explain what this bot can do and how to use it.',
+      parameters: { type: 'OBJECT', properties: {} },
+    },
+  ],
+}];
+
+function dispatchSystemPrompt(tree) {
+  return `You are the dispatcher for a Telegram notebook bot — a personal note tree the user manages entirely through chat.
+
+The notebook tree (path  [entry count] + previews of latest entries):
 ${tree}
 
-Classify the user's message into ONE action and reply with ONLY strict JSON. Actions:
-- {"action":"note","text":"<the note content>"}                       -> a new note to auto-file
-- {"action":"read","path":"<topic>"}                                   -> read/show a topic
-- {"action":"export","path":"<topic or 'all'>"}                        -> export PDF
-- {"action":"delete_topic","path":"<topic>"}                           -> delete a topic
-- {"action":"delete_entry","path":"<topic>","entry_hint":"<what the entry says>"} -> delete one entry
-- {"action":"edit","path":"<topic>","entry_hint":"<which entry>","instruction":"<how to change it>"} -> edit an entry
-- {"action":"browse"}                                                  -> show/browse topics
-- {"action":"help"}                                                    -> how to use
-Use the tree paths exactly as listed (with > separators). Each line shows a path, its entry count, and previews of its latest entries. CRITICAL targeting rules:
-- When the user references an entry by content or loosely (e.g. "that morning note", "my note about X"), resolve "path" to the DEEPEST node whose entries actually match the description — a note described as "the morning note" that lives under morning > random belongs to path "morning > random", NOT "morning".
+Decide what the user's message is:
+- If it asks you to DO something with the notebook (save a note, read, export, edit, delete, browse), call the matching function exactly once. Never claim you did something without calling its function.
+- If it is NOT an actionable notebook request — a greeting, small talk, a question, a request for ideas or anything else — do NOT call any function. Just reply conversationally and helpfully in plain text. You may briefly mention what you can do with their notebook if relevant.
+- If the user gives you information without an explicit command, that is a note to save: call file_note.
+
+Targeting rules for paths:
+- Use paths exactly as listed above, slash-separated.
+- When the user references an entry by content or loosely (e.g. "that morning note", "my note about X"), resolve "path" to the DEEPEST node whose entries actually match the description — a note described as "the morning note" that lives under morning/random belongs to path "morning/random", NOT "morning".
 - Prefer a node that actually contains a matching entry over an empty parent with a similar name.
-- If a referenced topic is not in the tree, still give your best-guess path string.
+- If a referenced topic is not in the tree, still pass your best-guess path.`;
+}
 
-USER MESSAGE:
-${text}` }],
-    }],
-    generationConfig: { temperature: 0.1, maxOutputTokens: 300 },
-  });
-  const intent = parseJsonLoose(raw);
+const MAX_DISPATCH_ROUNDS = 4;
 
-  switch (intent.action) {
-    case 'note':
-      await autoFileNote(env, chatId, intent.text || text, statusMessageId);
-      return;
-    case 'read': {
-      const path = await resolvePath(env, String(intent.path || '').replace(/\s*>\s*/g, '/'), true);
-      if (path === null) { await editText(env, chatId, statusMessageId, `Topic not found: ${intent.path}`); return; }
-      await editText(env, chatId, statusMessageId, '📖 Here it is:');
-      await sendReadPage(env, chatId, path, 0, await h8(path));
-      return;
-    }
-    case 'export': {
-      const path = /^all$/i.test(intent.path || '') ? '' : await resolvePath(env, String(intent.path || '').replace(/\s*>\s*/g, '/'), true);
-      if (path === null) { await editText(env, chatId, statusMessageId, `Topic not found: ${intent.path}`); return; }
-      await editText(env, chatId, statusMessageId, '⏳ Rendering PDF…');
-      await doExport(env, chatId, path, statusMessageId);
-      return;
-    }
-    case 'delete_topic': {
-      const path = await resolvePath(env, String(intent.path || '').replace(/\s*>\s*/g, '/'), true);
-      if (path === null) { await editText(env, chatId, statusMessageId, `Topic not found: ${intent.path}`); return; }
-      const breadcrumb = path.split('/').join(' › ');
-      await editText(env, chatId, statusMessageId,
-        `⚠️ Delete topic "${path.split('/').pop()}" (${breadcrumb}) and everything inside?`,
-        { keyboard: confirmDeleteKeyboard(await h8(path), 'topic') });
+// The tool loop (Compass agent.ts pattern): call Gemini with the tools
+// declared; plain text with no function call IS the reply (never an error);
+// function calls execute against the real Codex handlers and their results
+// go back as functionResponse parts for a possible follow-up round.
+async function classifyAndDispatch(env, chatId, text, statusMessageId) {
+  const tree = await treeListing(env);
+  const contents = [{ role: 'user', parts: [{ text }] }];
+
+  for (let round = 0; round < MAX_DISPATCH_ROUNDS; round++) {
+    const content = await geminiContent(env, {
+      systemInstruction: { role: 'system', parts: [{ text: dispatchSystemPrompt(tree) }] },
+      contents,
+      tools: DISPATCH_TOOLS,
+      toolConfig: { functionCallingConfig: { mode: 'AUTO' } },
+      generationConfig: { temperature: 0.4, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 512 } },
+    });
+
+    if (!content) {
+      await editText(env, chatId, statusMessageId, "I'm here — could you say that again?");
       return;
     }
-    case 'delete_entry': {
-      await handleEntryAction(env, chatId, statusMessageId, intent, 'delete');
+    contents.push(content);
+
+    const parts = content.parts || [];
+    const calls = [];
+    let textChunk = '';
+    for (const part of parts) {
+      if (part.functionCall) calls.push({ name: part.functionCall.name, args: part.functionCall.args || {} });
+      else if (part.text) textChunk += part.text;
+    }
+
+    // No function call -> conversation, not a failure. The model's text IS
+    // the reply (the correct outcome for input like "Hi tell me something
+    // abstract").
+    if (!calls.length) {
+      const reply = textChunk.trim() ||
+        'Sorry, I lost my train of thought there — could you rephrase or send that again?';
+      await editText(env, chatId, statusMessageId, reply);
       return;
     }
-    case 'edit': {
-      await handleEntryAction(env, chatId, statusMessageId, intent, 'edit');
-      return;
+
+    const responseParts = [];
+    let allTerminal = true;
+    for (const call of calls) {
+      const result = await executeDispatchTool(env, chatId, statusMessageId, call, text);
+      if (!result.terminal) allTerminal = false;
+      responseParts.push({ functionResponse: { name: call.name, response: result.response } });
     }
-    case 'browse': {
-      const { getNodes } = await import('./tree.js');
-      const { browseKeyboard } = await import('./keyboards.js');
-      const nodes = await getNodes(env);
-      const root = nodes.get('');
-      await editText(env, chatId, statusMessageId, '🗂 Your topics — pick one to open:',
-        { keyboard: await browseKeyboard('', root ? root.children : [], { backTo: null }) });
-      return;
+    contents.push({ role: 'function', parts: responseParts });
+
+    // Every Codex tool delivers its own user-facing response (confirm
+    // keyboard, read page, filed confirmation...), so explicit single-tool
+    // requests finish in ONE round — no gratuitous follow-up Gemini call.
+    if (allTerminal) return;
+  }
+
+  await editText(env, chatId, statusMessageId,
+    'I hit a snag thinking that through. Try again in a moment?');
+}
+
+// Execute one function call against the real Codex handlers. Every branch
+// delivers the user-facing response itself (terminal: true ends the loop in
+// one round). Failures produce SPECIFIC messages — never the old generic
+// "I could not handle that", and never a raw exception.
+async function executeDispatchTool(env, chatId, statusMessageId, call, originalText) {
+  const { name, args } = call;
+  const fail = async (msg) => {
+    await editText(env, chatId, statusMessageId, msg);
+    return { response: { ok: false, error: msg }, terminal: true };
+  };
+  try {
+    switch (name) {
+      case 'file_note': {
+        await autoFileNote(env, chatId, String(args.text || originalText), statusMessageId);
+        return { response: { ok: true }, terminal: true };
+      }
+      case 'read_topic': {
+        const path = await resolvePath(env, String(args.path || '').replace(/\s*>\s*/g, '/'), true);
+        if (path === null) return fail(`Topic not found: ${args.path}`);
+        await editText(env, chatId, statusMessageId, '📖 Here it is:');
+        await sendReadPage(env, chatId, path, 0, await h8(path));
+        return { response: { ok: true, path }, terminal: true };
+      }
+      case 'export_pdf': {
+        const want = String(args.path || 'all');
+        const path = /^(all|everything|whole( notebook)?)$/i.test(want)
+          ? ''
+          : await resolvePath(env, want.replace(/\s*>\s*/g, '/'), true);
+        if (path === null) return fail(`Topic not found: ${args.path}`);
+        await editText(env, chatId, statusMessageId, '⏳ Rendering PDF…');
+        await doExport(env, chatId, path, statusMessageId);
+        return { response: { ok: true, path }, terminal: true };
+      }
+      case 'delete_topic': {
+        const path = await resolvePath(env, String(args.path || '').replace(/\s*>\s*/g, '/'), true);
+        if (path === null) return fail(`Topic not found: ${args.path}`);
+        const breadcrumb = path.split('/').join(' › ');
+        await editText(env, chatId, statusMessageId,
+          `⚠️ Delete topic "${path.split('/').pop()}" (${breadcrumb}) and everything inside?`,
+          { keyboard: confirmDeleteKeyboard(await h8(path), 'topic') });
+        return { response: { ok: true, path, confirmPresented: true }, terminal: true };
+      }
+      case 'delete_everything': {
+        const count = (await listNodePaths(env, true)).filter(Boolean).length;
+        if (!count) return fail('The notebook is already empty — nothing to delete.');
+        await editText(env, chatId, statusMessageId,
+          `⚠️ Delete the ENTIRE notebook — all ${count} topic${count === 1 ? '' : 's'} and every entry inside them?\n\nThis cannot be undone (recoverable only via git history).`,
+          { keyboard: confirmDeleteKeyboard('root', 'EVERYTHING') });
+        return { response: { ok: true, confirmPresented: true, topics: count }, terminal: true };
+      }
+      case 'delete_entry': {
+        await handleEntryAction(env, chatId, statusMessageId,
+          { path: args.path, entry_hint: args.entry_hint }, 'delete');
+        return { response: { ok: true }, terminal: true };
+      }
+      case 'edit_entry': {
+        await handleEntryAction(env, chatId, statusMessageId,
+          { path: args.path, entry_hint: args.entry_hint, instruction: args.instruction }, 'edit');
+        return { response: { ok: true }, terminal: true };
+      }
+      case 'browse_topics': {
+        const { browseKeyboard } = await import('./keyboards.js');
+        const nodes = await getNodes(env);
+        const root = nodes.get('');
+        await editText(env, chatId, statusMessageId, '🗂 Your topics — pick one to open:',
+          { keyboard: await browseKeyboard('', root ? root.children : [], { backTo: null }) });
+        return { response: { ok: true }, terminal: true };
+      }
+      case 'help': {
+        await editText(env, chatId, statusMessageId,
+          'I can capture notes (just send text or voice — I file them), browse, read, export, edit and delete. Commands: /new /add /topics /read /export /delete — or /help.');
+        return { response: { ok: true }, terminal: true };
+      }
+      default:
+        return fail(`I don't have a way to "${name}" yet — try /help for what I can do.`);
     }
-    default:
-      await editText(env, chatId, statusMessageId,
-        'I can capture notes, browse, read, export, edit and delete. Try /help for commands.');
+  } catch (e) {
+    console.error(`dispatch tool ${name} failed`, e);
+    return fail(`❌ That ${name.replace(/_/g, ' ')} failed (${String(e && e.message || e).slice(0, 120)}). Nothing was changed — try again, or use a command from /help.`);
   }
 }
 
@@ -550,7 +750,7 @@ ${tree}
 
 Reply with ONLY strict JSON: {"path":"<existing path with > separators>","caption":"<one-line description for the note>"} to use an existing topic, or {"title":"<new topic>","parent":"<parent or empty>","caption":"<one-line description>","new":true}.` },
     ] }],
-    generationConfig: { temperature: 0.2, maxOutputTokens: 256 },
+    generationConfig: { temperature: 0.2, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 512 } },
   });
   const decision = parseJsonLoose(raw);
   let nodePath = null;

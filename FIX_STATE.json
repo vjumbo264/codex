@@ -1,85 +1,72 @@
 {
   "project": "codex",
   "repo": "https://github.com/vjumbo264/codex",
-  "round": "persistent-session-fix-v5-live-export-and-gemini-dispatch",
+  "round": "persistent-session-fix-v7-dispatch-function-calling-rebuild",
   "fixes_complete": true,
   "current_fix": null,
   "last_updated_utc": "2026-09-04",
-  "prior_rounds_note": "v4 (see git history: DEPLOYMENT.md, probe commit a60afc8 reverted in 7ffa234) proved the deploy pipeline works end-to-end live (push to main -> GitHub Actions deploy.yml -> wrangler -> live Worker), and the operator has confirmed real live UI and live Gemini reasoning. This round (v5) is genuine feature bugs on a trustworthy pipeline: (1) PDF export fails on the live bot; (2) Gemini-dispatched tasks fail or return 'not found' (concrete operator instance: 'Delete that morning note' -> 'No entries found there.' even though a note existed under morning/random). Deploy verification is NOT re-opened unless something observed this round actively contradicts DEPLOYMENT.md.",
-  "live_state_at_round_start": {
-    "bot": "@mscodex_bot (id 8717684187), webhook https://codex-bot.vjumbo264.workers.dev/ confirmed live via getWebhookInfo 2026-09-04 (pending_update_count=0, allowed_updates message+callback_query)",
-    "live_notebook_tree_via_github_api": [
-      "notebook/morning/index.md  (title '# morning', zero entries)",
-      "notebook/morning/random/index.md  (title '# random', ONE entry: id 20260904-111139-jh2t, date 2026-09-04 · 11:11 UTC, body 'Create a new random note')"
-    ],
-    "evidence_standard": "Every fix: reproduce with real evidence against the live bot (TELEGRAM_BOT_TOKEN) and/or by running the Worker's own code against real live tree data -> literal error/response captured -> root cause confirmed -> fix -> deploy -> re-run the same reproduction live -> literal observed result recorded here."
-  },
+  "round_summary": "Root cause CONFIRMED with captured evidence (fix-01): the old classifyAndDispatch demanded 'ONLY strict JSON' and hand-parsed it; for 'Hi tell me something abstract' the live model returned a TRUNCATED JSON fragment {'action':'note','text':' (300-token cap, thinking tokens eating the budget) which parseJsonLoose rejected with 'no json in response'; for the two delete inputs the pool's keys hit transient 503 UNAVAILABLE which the one-shot same-key retry let bubble. ALL failure categories collapsed into the single outer catch -> the identical generic 'I could not handle that' the operator saw on all three inputs. fix-02 rebuilt dispatch on Gemini NATIVE function-calling following the Compass pattern (motionssalt/compass src/ai/agent.ts): real functionDeclarations, bounded multi-round loop, plain-text-with-no-function-call is the valid conversational outcome, distinct friendly fallbacks at every failure point, one-round resolution for explicit requests, deletes still confirm-gated. fix-03 added a declared delete_everything tool + root-capable deleteNodeTree + D:root callback branch. fix-04 verified exact-name topic delete resolves live.",
   "session_history": [
-    {
-      "session": 1,
-      "date_utc": "2026-09-04",
-      "summary": "v5 round seeded: FIX_STATE.json replaced with the v5 contract's two fixes (fix-01 PDF export fails; fix-02 Gemini-dispatched tasks fail/'not found'), both pending. Prior v4 state content superseded; v2 archive (FIX_STATE_v2_archive.json) untouched. Live tree snapshot recorded (morning, morning/random with one real entry 20260904-111139-jh2t)."
-    },
-    {
-      "session": 1,
-      "date_utc": "2026-09-04",
-      "summary": "fix-01+fix-02 reproduced with literal evidence against the Worker's own code + real live tree + real live KV Gemini key pool, root-caused, fixed, and re-run green. Deployed via this push (worker/** changed -> Actions deploy.yml). Post-deploy live check follows."
-    },
-    {
-      "session": 1,
-      "date_utc": "2026-09-04",
-      "summary": "Post-deploy liveness verified: Actions run 37000798 completed success 11:34:34Z; new Cloudflare deployment 782ebc4f-2a5 created 2026-09-04T11:35:26Z (after push); live GET https://codex-bot.vjumbo264.workers.dev/ -> 200 'codex-bot ok'. Whole-round VERIFY satisfied with the evidence already recorded (post-fix reproductions ran against the final code state on real live data). fixes_complete -> true."
-    }
+    {"session": 1, "date_utc": "2026-09-04", "summary": "Seeded v7 state (superseding v5), studied Compass reference (agent.ts/gemini.ts/tools.ts/toolExecutor.ts) and current worker/src/gemini.js end-to-end."},
+    {"session": 1, "date_utc": "2026-09-04", "summary": "fix-01 evidence captured via harness running the Worker's OWN code (verbatim current prompt, exported gem() pipeline, real live KV key pool of 7 keys, real live tree). Recorded verbatim below."},
+    {"session": 1, "date_utc": "2026-09-04", "summary": "fix-02+03+04 implemented atomically: geminiOnce now returns full response data; new geminiData/geminiContent split; 5xx same-key-retry now rotates to next key; classifyAndDispatch replaced by a 4-round function-calling loop with 9 declared tools; executeDispatchTool routes to existing handlers with per-failure specific messages; tree.js filesUnderNode root fix; callbacks.js D:root whole-notebook branch; routeFreeText outer-catch message no longer the old generic string. autoFileNote/autoFilePhoto output budgets raised 256->2048 with thinkingBudget 512 after live evidence of truncation ('no json in response')."},
+    {"session": 1, "date_utc": "2026-09-04", "summary": "Whole-round VERIFY passed: real routeFreeText executed end-to-end against the real live tree + real key pool (Telegram API intercepted for capture only). 6/6 inputs produced sensible, distinct, non-generic responses; literal outputs recorded below; auto-file side effect cleaned up (deleted new node plants, 1 file)."}
   ],
   "fixes": [
     {
-      "id": "fix-01",
-      "name": "PDF export fails — reproduce, root-cause, fix, validate live",
-      "status": "done",
-      "notes": "Operator-reported: tapping Export PDF fails. Plan: (a) run exportPdf/doExport code path locally against the REAL live tree (morning, morning/random + its real entry) using the same GitHub-read logic; (b) actually trigger /export all and /export morning on the live bot via Bot API sendMessage from this session; capture the literal error or malformed output. Candidates to check only once a real symptom exists: image embedding via rawUrl fetch; deeply nested/unusual entries; sendDocumentBytes multipart correctness and Telegram's actual rejection reason; whether it's scope-specific (whole notebook vs one topic).",
-      "files": [
-        "worker/src/export.js",
-        "worker/src/pdf.js",
-        "worker/src/telegram.js"
-      ],
-      "commits": [
-        "3700079"
-      ],
-      "tested": "POST-FIX re-run of the identical harness against the SAME live tree: exportPdf('') -> 12159 bytes header '%PDF-1.7'; exportPdf('morning') -> 10829 bytes '%PDF-1.7'; exportPdf('morning/random') -> 10543 bytes '%PDF-1.7' (real PDFs saved locally and byte-verified). node --check passes on pdf.js. Live-bot sendDocumentBytes path unchanged code-wise and was never the failure point (the exception preceded it).",
-      "concerns": "Direct Bot API tap-through of the live bot is not possible from this session (no chat_id discoverable while the webhook is set — getUpdates is disabled under a webhook — and no WEBHOOK_SECRET to inject synthetic updates); per the contract's minimum-evidence clause validation was done by executing the Worker's own exportPdf against real live tree data, capturing literal before/after output. Post-deploy liveness of the new bundle is verified via the deployments API + live GET.",
-      "reproduced_failure_literal": "Ran the live Worker's own exportPdf (worker/src/pdf.js, unmodified) against the REAL live tree via the same GitHub Contents-API read path. ALL THREE scopes threw identically: 'Error: Input to `PDFDocument.embedFont` was a custom font, but no `fontkit` instance was found. You must register a `fontkit` instance with `PDFDocument.registerFontkit(...)` before embedding custom fonts.' (FontkitNotRegisteredError, pdf-lib PDFDocument.embedFont, thrown at exportPdf pdf.js:160). Scopes failed: '' (whole notebook), 'morning', 'morning/random'. On the live bot this surfaces as the operator's 'Export fails': callbacks x/X catch it and send '❌ Export failed.', commands.js /export likewise, doExport's status message is left stuck at '⏳ Gathering notes…'.",
-      "root_cause": "pdf.js embeds custom TTF fonts (DejaVuSans) via doc.embedFont(bytes, {subset:true}) but never called doc.registerFontkit(fontkit), and '@pdf-lib/fontkit' was not even in worker/package.json dependencies (only pdf-lib). pdf-lib REQUIRES a registered fontkit for custom-font embedding, so exportPdf throws on the very first font embed — before any page is drawn — for every scope, every notebook, regardless of content. Not image-related, not size-related, not Telegram-related: the PDF bytes never existed.",
-      "fix": "worker/src/pdf.js: import fontkit from '@pdf-lib/fontkit' + doc.registerFontkit(fontkit) immediately after PDFDocument.create(); worker/package.json: added dependency @pdf-lib/fontkit ^1.1.1 (bundled by wrangler at deploy)."
+      "id": "fix-01", "status": "done",
+      "name": "Confirm exact failure mode with real captured evidence",
+      "files": ["worker/src/gemini.js"], "commits": ["this push"],
+      "reproduced_failure_literal": "Verbatim current-prompt runs (configured model gemini-flash-lite-latest): all three inputs -> 'Error: Gemini 503: This model is currently experiencing high demand' (one-shot same-key retry hit the same 503, then bubble). Same prompt on gemini-flash-latest: 'Hi tell me something abstract' -> raw response literally '{\"action\":\"note\",\"text\":\"' (TRUNCATED mid-string at the 300-token cap) -> parseJsonLoose threw 'no json in response'. Every one of these paths lands in the same routeFreeText outer catch -> '❌ I could not handle that. Try a command from /help.' — the exact message the operator captured on all three inputs.",
+      "root_cause": "Structural: (1) a demanded-strict-JSON hand-parsed classifier has no valid shape for non-actionable input, so prose/truncation/fences all throw; (2) maxOutputTokens 300 is eaten by thinking tokens on current models, truncating JSON mid-stream; (3) 503s were retried once on the SAME key then bubbled to the generic catch; (4) one catch for every category => one opaque message.",
+      "fix": "Evidence only (rebuild is fix-02). Also confirmed gemini-flash-lite-latest 503-saturated, gemini-2.5-flash-lite and gemini-2.0-flash-lite RETIRED (404 no longer available), gemini-flash-latest healthy — model health is a live variable, hence the 5xx rotation hardening in fix-02.",
+      "tested": "harness/fix01.mjs captured all raw responses verbatim before parseJsonLoose.",
+      "concerns": "The live bot's configured model (wrangler [vars] GEMINI_MODEL=gemini-flash-lite-latest) was returning 503s at evidence time; the new 5xx-rotation across the 7-key pool absorbs this far better, but the operator may want to point GEMINI_MODEL at gemini-flash-latest if the lite alias stays saturated. Not changed in code — runtime config."
     },
     {
-      "id": "fix-02",
-      "name": "Gemini-dispatched tasks fail or return 'not found' — reproduce, root-cause, fix, validate live",
-      "status": "done",
-      "notes": "Operator-reported: 'When I ask AI to do some tasks it fails or says not found.' Concrete prior instance: 'Delete that morning note' -> 'No entries found there.' while a note existed under morning/random (the entry lives one level deeper than the literal 'morning' topic). Reproduction order: (1) natural imprecise reference to real live content via the live bot and/or direct dispatch-path simulation; (2) exact unambiguous reference (literal path / entry id) to isolate resolution-matching vs dispatch-mechanism; (3) at least one other dispatched task type beyond delete (edit, natural-language read). Code-reading hypothesis to confirm/refute with evidence ONLY: classifyAndDispatch resolves intent.path via resolvePath('morning') -> resolves to the EMPTY parent node 'morning' -> handleEntryAction reads morning (zero entries) -> 'No entries found there.' without ever descending into morning/random; handleEntryAction also never searches other nodes when the resolved node is empty, and never searches the whole tree when resolution returns null. Fix must make correctly-referenced live content resolve (descend/search deeper, use entry content + recency as signal, search whole tree before reporting not-found) — NOT weaken 'not found' reporting.",
-      "files": [
-        "worker/src/gemini.js",
-        "worker/src/router.js"
-      ],
-      "commits": [
-        "3700079"
-      ],
-      "tested": "POST-FIX harness (Worker's own routeFreeText -> classifyAndDispatch against the REAL live tree, REAL Gemini key read from live CODEX_KV, Telegram calls captured): 'Delete that morning note' -> '⚠️ Delete entry 20260904-111139-jh2t from random (morning › random)? _2026-09-04 · 11:11 UTC_ Create a new random note' (was: 'No entries found there.'); 'delete entry 20260904-111139-jh2t from morning/random' -> same correct confirm; 'Delete the note in morning/random that says Create a new random note' -> same correct confirm; 'Read me my morning note' -> '📖 Here it is:' + full read page of morning/random containing entry …jh2t (intermediately reproduced 'Topic not found: morning > random' -> separator fix -> PASS). No live writes were made (edit case deliberately excluded from the harness; delete flows stop at the confirm button).",
-      "concerns": "treeListing now reads each node's index.md (one Contents-API GET per node) at classification time — negligible for the current 2-node tree; worth revisiting (cache/preview cap) if the tree grows large. Same session limitation as fix-01 re: direct Bot API tap-through.",
-      "reproduced_failure_literal": "Operator case 'Delete that morning note' -> 'No entries found there.': traced by executing the Worker's own classifyAndDispatch/handleEntryAction against the REAL live tree (morning has 0 entries; morning/random holds entry 20260904-111139-jh2t). Pre-fix code path: resolvePath('morning') resolves to the EMPTY parent node 'morning'; handleEntryAction readNode('morning') -> 0 entries -> literal reply 'No entries found there.' — the entry one level deeper is never searched. SECOND defect found during post-fix verification: with the fix in place, 'Read me my morning note' still failed with literal reply 'Topic not found: morning > random' because the classifier emits ' > '-separated paths but resolvePath only splits '/', and read/export/delete_topic/delete_entry never normalized separators.",
-      "root_cause": "Two compounding resolution defects in worker/src/gemini.js: (1) handleEntryAction only inspected the single resolved node — no descendant search when that node was empty, no whole-tree search when the path didn't resolve, and no fallback when the entry-pick step missed; (2) classifier-emitted 'a > b' path strings were passed raw to resolvePath (splits on '/' only) so any multi-level natural-language target failed resolution outright.",
-      "fix": "gemini.js: (a) treeListing now includes per-node entry counts + previews of the latest 3 entries (content + id suffix) so the dispatcher sees entries below empty parents; (b) classifier prompt now instructs resolving to the DEEPEST node whose entries match the description and to prefer entry-bearing nodes over empty same-named parents; (c) handleEntryAction falls back to descendant search when the resolved node is empty, whole-tree content-scored search when the path doesn't resolve, and content-score/most-recent fallback when the entry-pick misses; (d) every dispatch resolution site normalizes ' > '/'>' to '/' before resolvePath."
+      "id": "fix-02", "status": "done",
+      "name": "Rebuild classifyAndDispatch on real Gemini function-calling (Compass pattern)",
+      "files": ["worker/src/gemini.js"], "commits": ["this push"],
+      "reproduced_failure_literal": "See fix-01.",
+      "root_cause": "See fix-01.",
+      "fix": "tools:[{functionDeclarations:[file_note, read_topic, export_pdf, delete_topic, delete_everything, delete_entry, edit_entry, browse_topics, help]}] with JSON-schema params; systemInstruction carries the tree + targeting rules (no more giant inline prompt); 4-round loop: geminiContent returns raw model content, functionCall parts execute via executeDispatchTool against the EXISTING handlers (autoFileNote, sendReadPage, doExport, confirmDeleteKeyboard flows, handleEntryAction), functionResponse parts feed back; zero calls => model text sent directly as the reply; fallbacks: missing content 'I'm here — could you say that again?', empty text 'lost my train of thought', round exhaustion 'I hit a snag thinking that through', per-tool failure 'That <tool> failed (<reason>). Nothing was changed'; all-terminal calls end in ONE round (quota-min principle); geminiOnce returns full data; 5xx now rotates keys after one same-key retry; legacy gemini() text-join preserved for transcription/auto-file/rewrite callers; deletes present confirm/cancel keyboards only — no auto-delete.",
+      "tested": "Live end-to-end (real code, real tree, real keys): 'Hi tell me something abstract' -> conversational reply ('Consider how a shadow is not an object...'), no tool call, no error; full 6-input matrix in verify section.",
+      "concerns": "One pool key (index 4) returned 401 during verification — rotation absorbed it transparently; operator may want to remove that dead key via Settings."
+    },
+    {
+      "id": "fix-03", "status": "done",
+      "name": "Whole-notebook delete as a proper tool (delete_everything)",
+      "files": ["worker/src/gemini.js", "worker/src/tree.js", "worker/src/callbacks.js"], "commits": ["this push"],
+      "reproduced_failure_literal": "'Delete all topics' -> 503-bubble -> generic error (fix-01 evidence); even when the model answered, there was NO whole-notebook action shape at all.",
+      "root_cause": "No such action existed; root deletion was also physically broken: filesUnderNode('') produced prefix 'notebook//' (never matches) and the callbacks D: branch assumed a non-root path (would have thrown path.split on null).",
+      "fix": "Declared delete_everything tool (no path param); presents confirm keyboard 'D:root' with scoped warning naming the count ('all N topics and every entry inside them'); tree.js filesUnderNode uses 'notebook/' prefix for root; callbacks.js D: branch handles path '' with a whole-notebook confirmation result message.",
+      "tested": "Live: 'Delete all topics' -> '⚠️ Delete the ENTIRE notebook — all 2 topics and every entry inside them? This cannot be undone (recoverable only via git history).' with buttons [✅ Yes, delete EVERYTHING => D:root | ❌ Cancel => c:0 | 🏠 Home]. Nothing deleted without the tap (tree snapshot unchanged after run).",
+      "concerns": "Confirm callback D:root executes deleteNodeTree('') which deletes every file under notebook/ — verified code path, intentionally NOT executed against the live notebook for obvious reasons; single-topic D: path logic unchanged."
+    },
+    {
+      "id": "fix-04", "status": "done",
+      "name": "Exact-name topic delete ('morning') resolves under new architecture",
+      "files": ["worker/src/gemini.js"], "commits": ["this push"],
+      "reproduced_failure_literal": "'Delete the topic called morning' -> 503-bubble -> generic error (fix-01 evidence).",
+      "root_cause": "Dispatch-level only: resolvePath handles 'morning' correctly (exact child-of-root leaf match); the v6 hypothesis about topics-with-children did not reproduce — the failure was entirely the JSON/503 collapse.",
+      "fix": "None needed beyond fix-02; verified directly as required instead of assumed.",
+      "tested": "Live: 'Delete the topic called morning' -> '⚠️ Delete topic \"morning\" (morning) and everything inside?' with [✅ Yes, delete topic => D:45a21e4b | ❌ Cancel | 🏠 Home] — correct node handle, correct scope, confirm-gated.",
+      "concerns": null
     }
   ],
-  "verification": {
-    "date_utc": "2026-09-04",
-    "notes": "fix-01 and fix-02 re-run freshly AFTER the final code state, green on all reproduction steps (3/3 export scopes produce valid PDFs; 4/4 dispatch cases resolve correctly). Regression spot-check: export path (doExport/sendDocumentBytes) untouched except the fontkit fix; key-pool loud-failure behavior untouched (keypool.js not modified); tap-only UI files (ui.js/keyboards.js/read.js/callbacks.js) untouched. Post-deploy: confirmed new Cloudflare deployment + live GET 200 (recorded in deploy_check below). Post-deploy confirmed live (see deploy_check).",
-    "live_evidence": [
-      "PRE-FIX exportPdf('') / exportPdf('morning') / exportPdf('morning/random') all threw FontkitNotRegisteredError at pdf.js:160 (live tree, live read path).",
-      "POST-FIX exportPdf produced %PDF-1.7 files: 12159 / 10829 / 10543 bytes respectively, same live data.",
-      "POST-FIX dispatch vs live tree + live KV key pool: 'Delete that morning note' -> confirm-delete of entry 20260904-111139-jh2t in morning › random (pre-fix: 'No entries found there.').",
-      "POST-FIX 'Read me my morning note' -> '📖 Here it is:' + entry …jh2t rendered (intermediate defect 'Topic not found: morning > random' fixed by separator normalization)."
+  "verify_evidence": {
+    "method": "Real worker/src/gemini.js routeFreeText executed in Node harness against the REAL live notebook tree and REAL live KV Gemini key pool; only the Telegram Bot API was intercepted (message capture). Same minimum-evidence standard as prior rounds (no chat_id injectable under the active webhook). Harness model gemini-flash-latest (configured lite alias 503-saturated at test time — see fix-01).",
+    "inputs_and_literal_outputs": [
+      "'Hi tell me something abstract' -> editMessageText: 'Consider how a shadow is not an object, yet it moves, changes shape, and exists only because light was interrupted on its way to somewhere else... If you'd like to jot down any thoughts, ideas, or reminders, just send them over and I can save them to your notebook!' (conversational, no tool, no error)",
+      "'Delete all topics' -> '⚠️ Delete the ENTIRE notebook — all 2 topics and every entry inside them? This cannot be undone (recoverable only via git history).' + [Yes, delete EVERYTHING => D:root | Cancel | Home]",
+      "'Delete the topic called morning' -> '⚠️ Delete topic \"morning\" (morning) and everything inside?' + [Yes, delete topic => D:45a21e4b | Cancel | Home]",
+      "'Read morning' -> '📖 Here it is:' then the morning › random read page with its real entry (…jh2t 'Create a new random note') and entry action buttons",
+      "'remember to water the monstera on Saturday' -> '✅ Created new topic \"plants\" (plants) and filed the note there as entry 20260904-124014-lkua.' + [View | Move | New topic] (side effect cleaned up: deleted node plants)",
+      "'what do you think about the color of Tuesday?' -> multi-paragraph conversational answer ending 'What color does Tuesday feel like to you?...' (no tool, no error)"
     ],
-    "deploy_check": "Actions 37000798 completed success 2026-09-04T11:34:34Z; CF deployment 782ebc4f-2a5 at 2026-09-04T11:35:26Z (supersedes 02:42:56Z); live GET 200 'codex-bot ok'."
-  },
-  "deploy_verification_carryover": "v4 deploy_verification complete (see DEPLOYMENT.md + git history around b63f198/a60afc8/7ffa234). Pipeline trusted this round; do not re-open unless contradicted."
+    "generic_error_reachable": false,
+    "delete_safety": "Both delete paths only PRESENTED confirm keyboards; tree snapshot before/after identical (nothing deleted without a tap).",
+    "manual_command_path": "Untouched: router/commands/keyboards/read/export/pdf modules have zero diff except the scoped callbacks.js D: root branch and tree.js prefix fix.",
+    "cleanup": "deleted new node plants (1 files) — live tree restored to morning, morning/random + entry jh2t"
+  }
 }

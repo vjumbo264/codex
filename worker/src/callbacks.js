@@ -203,11 +203,16 @@ export async function routeCallbackQuery(query, env) {
             `🗑 Deleted entry ${entryId} from ${title} (${where}).`);
         } else {
           const path = await resolveH8(env, handle, true);
-          const parentPath = path && path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-          const where = path ? path.split('/').join(' › ') : '(root)';
           const n = await deleteNodeTree(env, path);
-          await editText(env, chatId, messageId,
-            `🗑 Deleted topic "${path.split('/').pop()}" (${where}) and ${n} file${n === 1 ? '' : 's'} inside it.`);
+          if (!path) {
+            // v7 fix-03: whole-notebook delete, confirmed via 'D:root'.
+            await editText(env, chatId, messageId,
+              `🗑 Deleted the ENTIRE notebook — ${n} file${n === 1 ? '' : 's'} removed (every topic and entry). Recoverable only via git history.`);
+          } else {
+            const where = path.split('/').join(' › ');
+            await editText(env, chatId, messageId,
+              `🗑 Deleted topic "${path.split('/').pop()}" (${where}) and ${n} file${n === 1 ? '' : 's'} inside it.`);
+          }
         }
       } catch (e) {
         console.error(e);

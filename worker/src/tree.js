@@ -121,7 +121,9 @@ export async function listAssets(env, nodePath, fresh = false) {
 // delete. Returns repo paths relative to repo root.
 export async function filesUnderNode(env, nodePath, fresh = false) {
   const tree = await getTree(env, fresh);
-  const prefix = `${NB}/${nodePath}/`;
+  // v7 fix-03: nodePath '' (root) must match the whole notebook/ tree —
+  // the old template produced the never-matching prefix 'notebook//'.
+  const prefix = nodePath ? `${NB}/${nodePath}/` : `${NB}/`;
   return tree
     .filter(e => e.type === 'blob' && e.path.startsWith(prefix))
     .map(e => ({ path: e.path, sha: e.sha }));
