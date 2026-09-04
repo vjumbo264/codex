@@ -9,8 +9,11 @@ export async function tg(env, method, payload) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.ok === false) {
-    // 400 on edit with identical text is routine; everything else we log.
-    if (!(method === 'editMessageText' && res.status === 400)) {
+    // "message is not modified" is a routine no-op; every OTHER failure is
+    // logged — fix-silent-nonresponse: this used to suppress ALL
+    // editMessageText 400s, which silently swallowed "message is too long".
+    const desc = String((data && data.description) || '');
+    if (!(method === 'editMessageText' && res.status === 400 && /message is not modified/i.test(desc))) {
       console.error(`telegram ${method} -> ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
     }
     return null;
@@ -18,21 +21,50 @@ export async function tg(env, method, payload) {
   return data.result;
 }
 
-export function sendText(env, chatId, text, opts = {}) {
-  const payload = { chat_id: chatId, text };
-  if (opts.keyboard) payload.reply_markup = { inline_keyboard: opts.keyboard };
-  if (opts.forceReply) {
-    payload.reply_markup = { force_reply: true, selective: true, input_field_placeholder: opts.placeholder || 'Type here…' };
-  }
-  if (opts.replyTo) payload.reply_to_message_id = opts.replyTo;
-  if (opts.allowNoReply) payload.allow_sending_without_reply = true;
-  return tg(env, 'sendMessage', payload);
+// Telegram caps message text at 4096 chars (same chunking pattern as the
+// Compass reference bot's services/telegram.ts chunkText). Chunked callers
+// send the continuation parts as follow-up messages.
+export function chunkText(text, size = 4000) {
+  const t = String(text == null ? '' : text);
+  const chunks = [];
+  for (let i = 0; i < t.length; i += size) chunks.push(t.slice(i, i + size));
+  return chunks.length ? chunks : [''];
 }
 
-export function editText(env, chatId, messageId, text, opts = {}) {
-  const payload = { chat_id: chatId, message_id: messageId, text };
+export async function sendText(env, chatId, text, opts = {}) {
+  const chunks = chunkText(text);
+  let first = null;
+  for (let i = 0; i < chunks.length; i++) {
+    const payload = { chat_id: chatId, text: chunks[i] };
+    if (i === 0) {
+      if (opts.keyboard) payload.reply_markup = { inline_keyboard: opts.keyboard };
+      if (opts.forceReply) {
+        payload.reply_markup = { force_reply: true, selective: true, input_field_placeholder: opts.placeholder || 'Type here…' };
+      }
+      if (opts.replyTo) payload.reply_to_message_id = opts.replyTo;
+      if (opts.allowNoReply) payload.allow_sending_without_reply = true;
+    }
+    const out = await tg(env, 'sendMessage', payload);
+    if (i === 0) first = out;
+  }
+  return first; // Telegram Message of the first chunk, or null on failure
+}
+
+// Edit a message's text; if the replacement exceeds Telegram's 4096 cap the
+// overflow goes out as follow-up sendText chunks so the content is NEVER
+// lost to a silent 400 (the fix-silent-nonresponse root cause). Returns the
+// edited Message, or null when the edit itself failed (callers fall back).
+export async function editText(env, chatId, messageId, text, opts = {}) {
+  const chunks = chunkText(text);
+  const payload = { chat_id: chatId, message_id: messageId, text: chunks[0] };
   if (opts.keyboard) payload.reply_markup = { inline_keyboard: opts.keyboard };
-  return tg(env, 'editMessageText', payload);
+  const edited = await tg(env, 'editMessageText', payload);
+  if (edited !== null && chunks.length > 1) {
+    for (let i = 1; i < chunks.length; i++) {
+      await tg(env, 'sendMessage', { chat_id: chatId, text: chunks[i] });
+    }
+  }
+  return edited;
 }
 
 export function sendPhoto(env, chatId, photoUrl, caption) {

@@ -3,7 +3,7 @@
 // routes the update. Manual commands/buttons never touch Gemini. (redeploy)
 
 import { routeMessage, routeCallbackQuery } from './router.js';
-import { syncCommandMenu } from './telegram.js';
+import { syncCommandMenu, sendText } from './telegram.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -39,6 +39,19 @@ export default {
           }
         } catch (err) {
           console.error('update handling failed:', err && err.stack ? err.stack : err);
+          // fix-silent-nonresponse (Compass safeSendError pattern): the
+          // catch above used to be log-only, so any error escaping the
+          // routers left the user staring at "⏳ Working on it…" forever.
+          // Tell the user SOMETHING — best effort, never re-throw.
+          try {
+            const chatId = (update.message && update.message.chat && update.message.chat.id) ||
+              (update.callback_query && update.callback_query.message &&
+                update.callback_query.message.chat && update.callback_query.message.chat.id);
+            if (chatId) {
+              await sendText(env, chatId,
+                '⚠️ Something went wrong handling that. Please try again in a moment, or use a command from /help.');
+            }
+          } catch { /* never let the failure notifier itself fail */ }
         }
       })()
     );

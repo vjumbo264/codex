@@ -345,11 +345,14 @@ export async function routeFreeText(env, message, text, opts = {}) {
   if (opts.photo) {
     const status = await sendText(env, chatId, '⏳ Filing photo…');
     try {
-      await autoFilePhoto(env, message, text, status.message_id);
+      await autoFilePhoto(env, message, text, status && status.message_id);
     } catch (e) {
       console.error(e);
-      await editText(env, chatId, status.message_id,
-        allFailedMessage(e) || '❌ Could not file the photo. Try /add <topic>.');
+      if (!(await replaceStatus(env, chatId, status && status.message_id,
+        allFailedMessage(e) || '❌ Could not file the photo. Try /add <topic>.'))) {
+        await sendText(env, chatId,
+          allFailedMessage(e) || '❌ Could not file the photo. Try /add <topic>.');
+      }
     }
     return;
   }
@@ -358,12 +361,24 @@ export async function routeFreeText(env, message, text, opts = {}) {
   // in plain language, or an ambiguous target. One classification call:
   const status = await sendText(env, chatId, '⏳ Working on it…');
   try {
-    await classifyAndDispatch(env, chatId, text, status.message_id);
+    await classifyAndDispatch(env, chatId, text, status && status.message_id);
   } catch (e) {
     console.error('gemini dispatch failed', e);
-    await editText(env, chatId, status.message_id,
-      allFailedMessage(e) || '⚠️ The AI dispatcher hiccuped on that message. Try again in a moment, or use a command from /help.');
+    if (!(await replaceStatus(env, chatId, status && status.message_id,
+      allFailedMessage(e) || '⚠️ The AI dispatcher hiccuped on that message. Try again in a moment, or use a command from /help.'))) {
+      await sendText(env, chatId,
+        allFailedMessage(e) || '⚠️ The AI dispatcher hiccuped on that message. Try again in a moment, or use a command from /help.');
+    }
   }
+}
+
+// fix-silent-nonresponse: never let an unanswered placeholder stand. A null
+// statusMessageId (placeholder send failed) or a null editText result (edit
+// failed, e.g. deleted placeholder) downgrades to a plain sendText so the
+// user ALWAYS gets a visible outcome. Returns true when the edit landed.
+async function replaceStatus(env, chatId, statusMessageId, text, opts = {}) {
+  if (!statusMessageId) return false;
+  return (await editText(env, chatId, statusMessageId, text, opts)) !== null;
 }
 
 // ---- case 4 (v7 fix-02): native function-calling dispatch ------------------
@@ -497,7 +512,9 @@ async function classifyAndDispatch(env, chatId, text, statusMessageId) {
     });
 
     if (!content) {
-      await editText(env, chatId, statusMessageId, "I'm here — could you say that again?");
+      if (!(await replaceStatus(env, chatId, statusMessageId, "I'm here — could you say that again?"))) {
+        await sendText(env, chatId, "I'm here — could you say that again?");
+      }
       return;
     }
     contents.push(content);
@@ -516,7 +533,13 @@ async function classifyAndDispatch(env, chatId, text, statusMessageId) {
     if (!calls.length) {
       const reply = textChunk.trim() ||
         'Sorry, I lost my train of thought there — could you rephrase or send that again?';
-      await editText(env, chatId, statusMessageId, reply);
+      // PRIMARY ROOT CAUSE: this reply can exceed Telegram's 4096 cap; the
+      // old fire-and-forget editText swallowed the 400 and left "⏳ Working
+      // on it…" up forever. Chunking (editText) + sendText fallback keep
+      // the reply deliverable no matter what.
+      if (!(await replaceStatus(env, chatId, statusMessageId, reply))) {
+        await sendText(env, chatId, reply);
+      }
       return;
     }
 
@@ -535,8 +558,10 @@ async function classifyAndDispatch(env, chatId, text, statusMessageId) {
     if (allTerminal) return;
   }
 
-  await editText(env, chatId, statusMessageId,
-    'I hit a snag thinking that through. Try again in a moment?');
+  if (!(await replaceStatus(env, chatId, statusMessageId,
+    'I hit a snag thinking that through. Try again in a moment?'))) {
+    await sendText(env, chatId, 'I hit a snag thinking that through. Try again in a moment?');
+  }
 }
 
 // Execute one function call against the real Codex handlers. Every branch
@@ -546,7 +571,9 @@ async function classifyAndDispatch(env, chatId, text, statusMessageId) {
 async function executeDispatchTool(env, chatId, statusMessageId, call, originalText) {
   const { name, args } = call;
   const fail = async (msg) => {
-    await editText(env, chatId, statusMessageId, msg);
+    if (!(await replaceStatus(env, chatId, statusMessageId, msg))) {
+      await sendText(env, chatId, msg);
+    }
     return { response: { ok: false, error: msg }, terminal: true };
   };
   try {
@@ -778,4 +805,4 @@ Reply with ONLY strict JSON: {"path":"<existing path with > separators>","captio
     { keyboard: await filedActionsKeyboard(nodePath, entryId) });
 }
 
-export { gemini, parseJsonLoose };
+export { gemini, parseJsonLoose, classifyAndDispatch, replaceStatus };
