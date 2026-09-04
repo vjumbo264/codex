@@ -1,10 +1,10 @@
 {
   "project": "codex",
   "repo": "https://github.com/vjumbo264/codex",
-  "round": "persistent-session-fix-v7-dispatch-function-calling-rebuild",
-  "fixes_complete": true,
+  "round": "persistent-session-remove-placeholder-and-fix-false-key-exhaustion",
+  "fixes_complete": false,
   "current_fix": null,
-  "last_updated_utc": "2026-09-04",
+  "last_updated_utc": "2026-09-04T14:41:49Z",
   "round_summary": "Root cause CONFIRMED with captured evidence (fix-01): the old classifyAndDispatch demanded 'ONLY strict JSON' and hand-parsed it; for 'Hi tell me something abstract' the live model returned a TRUNCATED JSON fragment {'action':'note','text':' (300-token cap, thinking tokens eating the budget) which parseJsonLoose rejected with 'no json in response'; for the two delete inputs the pool's keys hit transient 503 UNAVAILABLE which the one-shot same-key retry let bubble. ALL failure categories collapsed into the single outer catch -> the identical generic 'I could not handle that' the operator saw on all three inputs. fix-02 rebuilt dispatch on Gemini NATIVE function-calling following the Compass pattern (motionssalt/compass src/ai/agent.ts): real functionDeclarations, bounded multi-round loop, plain-text-with-no-function-call is the valid conversational outcome, distinct friendly fallbacks at every failure point, one-round resolution for explicit requests, deletes still confirm-gated. fix-03 added a declared delete_everything tool + root-capable deleteNodeTree + D:root callback branch. fix-04 verified exact-name topic delete resolves live.",
   "session_history": [
     {
@@ -36,6 +36,16 @@
       "session": 2,
       "date_utc": "2026-09-04",
       "summary": "Live verification via worker/test/live-verify.mjs: real classifyAndDispatch + real key pool + real tree, Telegram API intercepted with real 4096 enforcement. gemini-flash-lite-latest 503 pool-wide (v7 saturation persists); gemini-flash-latest run PASS: editMessageText len=1292 replaced the placeholder. Initiative code work complete; production deploy left as the single human-review item (sandbox cannot wrangler deploy)."
+    },
+    {
+      "session": 3,
+      "date_utc": "2026-09-04",
+      "summary": "Step 0: pulled main (head dceab18), verified FIX_STATE.json, archived prior initiative fix-codex-silent-nonresponse into prior_initiatives, seeded new initiative remove-placeholder-and-fix-false-key-exhaustion."
+    },
+    {
+      "session": 3,
+      "date_utc": "2026-09-04",
+      "summary": "Read live code: gemini.js routeFreeText sends sendText(\"\u23f3 Working on it\u2026\") at line ~362 then classifyAndDispatch edits it via replaceStatus/editText at ~10 call sites; photo branch sends \"\u23f3 Filing photo\u2026\" at ~346. media.js ~144 deletes its own status message and delegates to routeFreeText which emits the placeholder. Read Compass reference end-to-end: handlers/webhook.ts processMessage -> sendChatAction(typing) -> runAgent -> ONE sendMessage(reply); src/ai/gemini.ts generate() rotates keys with header-free ?key= auth, model gemini-3.1-flash-lite, maxOutputTokens 2048 + thinkingBudget 512; no intermediate placeholder message anywhere in the Compass dispatch path."
     }
   ],
   "fixes": [
@@ -121,43 +131,81 @@
     "manual_command_path": "Untouched: router/commands/keyboards/read/export/pdf modules have zero diff except the scoped callbacks.js D: root branch and tree.js prefix fix.",
     "cleanup": "deleted new node plants (1 files) \u2014 live tree restored to morning, morning/random + entry jh2t"
   },
-  "initiative": "fix-codex-silent-nonresponse",
-  "current_step": "complete",
-  "investigation": {
-    "waitUntil_call_chain_confirmed": "index.js fetch(): after secret+json checks, ctx.waitUntil(async()=>{ syncCommandMenu; routeMessage/routeCallbackQuery }) then returns Response('ok',200) IMMEDIATELY \u2014 the Response does NOT await the work. routeMessage->routeFreeText (gemini.js) is inside that waitUntil. Production tail evidence: a signed synthetic free-text POST produced a full log trail ('telegram sendMessage -> 400 chat not found', 'gemini dispatch failed', 'update handling failed') from inside the waitUntil-deferred block \u2014 i.e. the waitUntil work RAN TO COMPLETION in production and was NOT killed mid-flight. So 'waitUntil deferral gets silently torn down' is REFUTED for this code path.",
-    "compass_comparison_result": "The contract's premise is FALSE. Compass src/index.ts stashes ctx on globalThis.__ctx then returns handleWebhook(req,env); handlers/webhook.ts processMessage work is wrapped and handed to ctx.waitUntil(work) (line ~88) \u2014 Compass DOES use waitUntil in the webhook/fetch path, structurally identical to Codex. waitUntil therefore cannot be the differentiator. Other structural differences noted: (a) Compass's outer failure handler calls safeSendError() to message the user on total failure; Codex's index.js catch only console.error's (no user-visible message). (b) Compass services/telegram.ts sendMessage returns Promise<number|null> and guards firstMsgId (never an unguarded .message_id deref). (c) Compass wrangler.toml has compatibility_flags=['nodejs_compat']; Codex has none (not implicated). (d) Compass runs GEMINI_MODEL=gemini-3.1-flash-lite; Codex runs gemini-flash-lite-latest (the model FIX_STATE v7 recorded as 503-saturated at evidence time).",
-    "other_swallowed_errors_found": [
-      "index.js:40-43 outer catch does ONLY console.error('update handling failed') \u2014 no sendText to the user. Any error escaping routeMessage/routeFreeText (including the TypeError below) results in total user silence. This is the sink that produces the observed 'ack then nothing'.",
-      "telegram.js tg() returns null on ANY non-OK Telegram response (sendMessage/editMessageText). A null result is only logged, never thrown, so callers that deref result.message_id throw a TypeError OUTSIDE their try/catch.",
-      "gemini.js:359 sendText('\u23f3 Working on it\u2026') is OUTSIDE the try (try begins line 360); line 361 status.message_id throws if sendText returned null."
-    ],
-    "confirmed_root_cause": "PRIMARY (real-chat): Codex's conversational dispatch replies can exceed Telegram's 4096-char message cap; worker/src/telegram.js editText() passes the oversized text straight to editMessageText with NO chunking, and tg() converts the resulting 400 'message is too long' into a silent null (telegram.js:13 even suppresses the error log for editMessageText 400s). classifyAndDispatch (gemini.js:519) awaits editText(statusMessageId, reply) and never checks the null result, so the '\u23f3 Working on it\u2026' placeholder is never replaced -> ack then total silence. EVIDENCE: live call to the configured model gemini-flash-lite-latest with the real function-calling dispatch payload returned a 9492-character reply (overTelegram4096=True). Compass's services/telegram.ts sendMessage chunks at 4000 chars and returns a guarded Promise<number|null>, so Compass never strands a placeholder \u2014 this is the actual behavioral difference, NOT waitUntil. SECONDARY (proven in production logs): a signed synthetic free-text POST showed sendText('\u23f3 Working on it\u2026') is OUTSIDE the try (gemini.js:359), so when sendText returns null (Telegram send failure) line 361 status.message_id throws a TypeError that escapes the inner catch and lands in index.js's log-only outer catch -> silence. AGGRAVATOR: gemini-flash-lite-latest returned 503 on 3/4 live calls (model saturation, matching FIX_STATE v7's note); the swallowed-edit path turns even a retry-exhausted error message into silence. waitUntil was REFUTED as a cause: Compass uses ctx.waitUntil in the same webhook path and the production tail showed the waitUntil work running to completion."
-  },
-  "fix": {
-    "status": "complete",
-    "approach": "Match Compass's guarantees: (1) add chunkText-based splitting (4000-char) to telegram.js and use it in sendText; make editText chunk too and RETURN whether the edit succeeded, and make tg() log editMessageText failures (stop the silent-400 suppression except 'message is not modified'); (2) classifyAndDispatch: fall back to sendText when the edit returns null so the reply is never lost; (3) routeFreeText/photo/tap-edit: null-safe status (status && status.message_id) and wrap the status send inside the try with a sendText fallback; (4) index.js outer catch: sendText the user a generic failure message (Compass safeSendError pattern) instead of log-only.",
-    "commits": [
-      "this push"
-    ]
-  },
+  "initiative": "remove-placeholder-and-fix-false-key-exhaustion",
+  "current_step": "step0-seed",
   "live_verification": {
-    "performed": true,
-    "result": "worker/test/live-verify.mjs executed the REAL worker/src/gemini.js classifyAndDispatch against the REAL live KV key pool (7 keys) and the REAL live notebook tree, with the Telegram Bot API intercepted but enforcing the REAL 4096-char cap. Model availability note: configured alias gemini-flash-lite-latest returned 503 UNAVAILABLE on the whole pool at verification time (matching the v7 fix-01 saturation record); the same live run with GEMINI_MODEL=gemini-flash-latest completed: telegram calls captured = [{\"method\":\"editMessageText\",\"len\":1292}] \u2014 the placeholder WAS replaced by a visible, 4096-safe reply. LIVE VERIFY PASS. The regression suite (17/17) covers the primary root cause deterministically: a 9492-char reply now edits the placeholder (4000-char first chunk) plus 2 follow-up chunks, zero calls over 4096, genuine edit 400s logged, not-modified no-op quiet, replaceStatus falls back to sendText on null status/failed edit. Full end-to-end production verification (signed webhook POST against the live deployed Worker) is pending deploy \u2014 the sandbox cannot run wrangler deploy, and the operator must NOT message the bot before the fixed code is deployed or the old bug still stands."
+    "part1_performed": false,
+    "part1_result": "",
+    "part2_performed": false,
+    "part2_result": ""
   },
-  "tests_added": [
-    "worker/test/silent-nonresponse.test.mjs (17 assertions, all passing)",
-    "worker/test/ttf-loader.mjs (Node ESM shim for wrangler Data-rule .ttf imports)",
-    "worker/test/live-verify.mjs (live harness: real classifyAndDispatch vs real key pool, Telegram API intercepted with real 4096 enforcement)"
-  ],
-  "full_suite_passing": true,
+  "tests_added": [],
+  "full_suite_passing": false,
   "human_review_items": [
-    "DEPLOY (required to close the user-visible symptom): cd worker && CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... node ../scripts/predeploy.mjs wrangler.toml && npx wrangler deploy \u2014 then send the bot a free-text message and confirm a reply follows the ack. The fix is committed (e5117ef) and pushed but NOT deployed from this session.",
-    "Consider GEMINI_MODEL=gemini-flash-latest in wrangler [vars]: gemini-flash-lite-latest was 503-saturated pool-wide during live verification.",
-    "Pool key index 4 (\u2026yMQw) returned 401 again during live verification \u2014 still dead; remove via Settings."
+    "DEPLOY (still pending from prior initiative): the fix-silent-nonresponse code is committed but was never wrangler-deployed from a session; this session has CLOUDFLARE_API_TOKEN and will attempt deploy after both parts land."
   ],
   "resume_from": {
-    "file": "FIX_STATE.json",
-    "component": "initiative",
-    "next_operation": "none \u2014 investigation + fix + tests + harness-level live verification complete; only production deploy remains (human_review_items)"
+    "file": "worker/src/gemini.js",
+    "component": "routeFreeText",
+    "next_operation": "Part 1: remove the placeholder sendText and its edit/replace chain; convert dispatch replies to direct sendText (Compass one-message shape)."
+  },
+  "prior_initiatives": [
+    {
+      "initiative": "fix-codex-silent-nonresponse",
+      "current_step": "complete",
+      "investigation": {
+        "waitUntil_call_chain_confirmed": "index.js fetch(): after secret+json checks, ctx.waitUntil(async()=>{ syncCommandMenu; routeMessage/routeCallbackQuery }) then returns Response('ok',200) IMMEDIATELY \u2014 the Response does NOT await the work. routeMessage->routeFreeText (gemini.js) is inside that waitUntil. Production tail evidence: a signed synthetic free-text POST produced a full log trail ('telegram sendMessage -> 400 chat not found', 'gemini dispatch failed', 'update handling failed') from inside the waitUntil-deferred block \u2014 i.e. the waitUntil work RAN TO COMPLETION in production and was NOT killed mid-flight. So 'waitUntil deferral gets silently torn down' is REFUTED for this code path.",
+        "compass_comparison_result": "The contract's premise is FALSE. Compass src/index.ts stashes ctx on globalThis.__ctx then returns handleWebhook(req,env); handlers/webhook.ts processMessage work is wrapped and handed to ctx.waitUntil(work) (line ~88) \u2014 Compass DOES use waitUntil in the webhook/fetch path, structurally identical to Codex. waitUntil therefore cannot be the differentiator. Other structural differences noted: (a) Compass's outer failure handler calls safeSendError() to message the user on total failure; Codex's index.js catch only console.error's (no user-visible message). (b) Compass services/telegram.ts sendMessage returns Promise<number|null> and guards firstMsgId (never an unguarded .message_id deref). (c) Compass wrangler.toml has compatibility_flags=['nodejs_compat']; Codex has none (not implicated). (d) Compass runs GEMINI_MODEL=gemini-3.1-flash-lite; Codex runs gemini-flash-lite-latest (the model FIX_STATE v7 recorded as 503-saturated at evidence time).",
+        "other_swallowed_errors_found": [
+          "index.js:40-43 outer catch does ONLY console.error('update handling failed') \u2014 no sendText to the user. Any error escaping routeMessage/routeFreeText (including the TypeError below) results in total user silence. This is the sink that produces the observed 'ack then nothing'.",
+          "telegram.js tg() returns null on ANY non-OK Telegram response (sendMessage/editMessageText). A null result is only logged, never thrown, so callers that deref result.message_id throw a TypeError OUTSIDE their try/catch.",
+          "gemini.js:359 sendText('\u23f3 Working on it\u2026') is OUTSIDE the try (try begins line 360); line 361 status.message_id throws if sendText returned null."
+        ],
+        "confirmed_root_cause": "PRIMARY (real-chat): Codex's conversational dispatch replies can exceed Telegram's 4096-char message cap; worker/src/telegram.js editText() passes the oversized text straight to editMessageText with NO chunking, and tg() converts the resulting 400 'message is too long' into a silent null (telegram.js:13 even suppresses the error log for editMessageText 400s). classifyAndDispatch (gemini.js:519) awaits editText(statusMessageId, reply) and never checks the null result, so the '\u23f3 Working on it\u2026' placeholder is never replaced -> ack then total silence. EVIDENCE: live call to the configured model gemini-flash-lite-latest with the real function-calling dispatch payload returned a 9492-character reply (overTelegram4096=True). Compass's services/telegram.ts sendMessage chunks at 4000 chars and returns a guarded Promise<number|null>, so Compass never strands a placeholder \u2014 this is the actual behavioral difference, NOT waitUntil. SECONDARY (proven in production logs): a signed synthetic free-text POST showed sendText('\u23f3 Working on it\u2026') is OUTSIDE the try (gemini.js:359), so when sendText returns null (Telegram send failure) line 361 status.message_id throws a TypeError that escapes the inner catch and lands in index.js's log-only outer catch -> silence. AGGRAVATOR: gemini-flash-lite-latest returned 503 on 3/4 live calls (model saturation, matching FIX_STATE v7's note); the swallowed-edit path turns even a retry-exhausted error message into silence. waitUntil was REFUTED as a cause: Compass uses ctx.waitUntil in the same webhook path and the production tail showed the waitUntil work running to completion."
+      },
+      "fix": {
+        "status": "complete",
+        "approach": "Match Compass's guarantees: (1) add chunkText-based splitting (4000-char) to telegram.js and use it in sendText; make editText chunk too and RETURN whether the edit succeeded, and make tg() log editMessageText failures (stop the silent-400 suppression except 'message is not modified'); (2) classifyAndDispatch: fall back to sendText when the edit returns null so the reply is never lost; (3) routeFreeText/photo/tap-edit: null-safe status (status && status.message_id) and wrap the status send inside the try with a sendText fallback; (4) index.js outer catch: sendText the user a generic failure message (Compass safeSendError pattern) instead of log-only.",
+        "commits": [
+          "this push"
+        ]
+      },
+      "live_verification": {
+        "performed": true,
+        "result": "worker/test/live-verify.mjs executed the REAL worker/src/gemini.js classifyAndDispatch against the REAL live KV key pool (7 keys) and the REAL live notebook tree, with the Telegram Bot API intercepted but enforcing the REAL 4096-char cap. Model availability note: configured alias gemini-flash-lite-latest returned 503 UNAVAILABLE on the whole pool at verification time (matching the v7 fix-01 saturation record); the same live run with GEMINI_MODEL=gemini-flash-latest completed: telegram calls captured = [{\"method\":\"editMessageText\",\"len\":1292}] \u2014 the placeholder WAS replaced by a visible, 4096-safe reply. LIVE VERIFY PASS. The regression suite (17/17) covers the primary root cause deterministically: a 9492-char reply now edits the placeholder (4000-char first chunk) plus 2 follow-up chunks, zero calls over 4096, genuine edit 400s logged, not-modified no-op quiet, replaceStatus falls back to sendText on null status/failed edit. Full end-to-end production verification (signed webhook POST against the live deployed Worker) is pending deploy \u2014 the sandbox cannot run wrangler deploy, and the operator must NOT message the bot before the fixed code is deployed or the old bug still stands."
+      },
+      "tests_added": [
+        "worker/test/silent-nonresponse.test.mjs (17 assertions, all passing)",
+        "worker/test/ttf-loader.mjs (Node ESM shim for wrangler Data-rule .ttf imports)",
+        "worker/test/live-verify.mjs (live harness: real classifyAndDispatch vs real key pool, Telegram API intercepted with real 4096 enforcement)"
+      ],
+      "full_suite_passing": true,
+      "human_review_items": [
+        "DEPLOY (required to close the user-visible symptom): cd worker && CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... node ../scripts/predeploy.mjs wrangler.toml && npx wrangler deploy \u2014 then send the bot a free-text message and confirm a reply follows the ack. The fix is committed (e5117ef) and pushed but NOT deployed from this session.",
+        "Consider GEMINI_MODEL=gemini-flash-latest in wrangler [vars]: gemini-flash-lite-latest was 503-saturated pool-wide during live verification.",
+        "Pool key index 4 (\u2026yMQw) returned 401 again during live verification \u2014 still dead; remove via Settings."
+      ],
+      "resume_from": {
+        "file": "FIX_STATE.json",
+        "component": "initiative",
+        "next_operation": "none \u2014 investigation + fix + tests + harness-level live verification complete; only production deploy remains (human_review_items)"
+      }
+    }
+  ],
+  "part1_placeholder_removal": {
+    "call_sites_found": [],
+    "message_id_dependents_found": [],
+    "status": "in_progress"
+  },
+  "part2_key_exhaustion": {
+    "investigation": {
+      "real_status_body_evidence": [],
+      "hypothesis_tested": [],
+      "confirmed_root_cause": ""
+    },
+    "fix": {
+      "status": "not_started",
+      "approach": ""
+    }
   }
 }
