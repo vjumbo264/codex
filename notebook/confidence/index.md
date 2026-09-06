@@ -1,12 +1,5 @@
 # Confidence
 
-<!-- e:20260906-085354-8k35 -->
-_2026-09-06 · 08:53 UTC_
-
-stop checking your phone first thing in the morning, seriously
-
----
-
 <!-- e:20260906-085359-f1t4 -->
 _2026-09-06 · 08:53 UTC_
 
