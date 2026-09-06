@@ -20,3 +20,10 @@ _2026-09-06 · 09:03 UTC_
 Never text first twice in a row
 
 ---
+
+<!-- e:20260906-090429-yurw -->
+_2026-09-06 · 09:04 UTC_
+
+why do I always say yes to things I don't even want to do
+
+---
