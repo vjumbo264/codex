@@ -1,12 +1,5 @@
 # Confidence
 
-<!-- e:20260906-090343-t7nh -->
-_2026-09-06 · 09:03 UTC_
-
-Never text or call first twice in a row
-
----
-
 <!-- e:20260906-090429-yurw -->
 _2026-09-06 · 09:04 UTC_
 
