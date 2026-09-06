@@ -1,351 +1,55 @@
 {
   "project": "codex",
   "repo": "https://github.com/vjumbo264/codex",
-  "round": "persistent-session-adapt-compass-pattern-d1-and-user-lock",
-  "fixes_complete": true,
-  "current_fix": null,
-  "last_updated_utc": "2026-09-04T22:20:00Z",
-  "round_summary": "Root cause CONFIRMED with captured evidence (fix-01): the old classifyAndDispatch demanded 'ONLY strict JSON' and hand-parsed it; for 'Hi tell me something abstract' the live model returned a TRUNCATED JSON fragment {'action':'note','text':' (300-token cap, thinking tokens eating the budget) which parseJsonLoose rejected with 'no json in response'; for the two delete inputs the pool's keys hit transient 503 UNAVAILABLE which the one-shot same-key retry let bubble. ALL failure categories collapsed into the single outer catch -> the identical generic 'I could not handle that' the operator saw on all three inputs. fix-02 rebuilt dispatch on Gemini NATIVE function-calling following the Compass pattern (motionssalt/compass src/ai/agent.ts): real functionDeclarations, bounded multi-round loop, plain-text-with-no-function-call is the valid conversational outcome, distinct friendly fallbacks at every failure point, one-round resolution for explicit requests, deletes still confirm-gated. fix-03 added a declared delete_everything tool + root-capable deleteNodeTree + D:root callback branch. fix-04 verified exact-name topic delete resolves live.",
+  "round": "persistent-session-dispatch-reasoning-quality-v10",
+  "fixes_complete": false,
+  "current_fix": "fix-01",
+  "last_updated_utc": "2026-09-06T01:30:00Z",
+  "round_summary": "Dispatcher reasoning-quality round: bring dispatchSystemPrompt's reasoning guidance up to Compass's systemPrompt.ts standard (worked examples, explicit note-vs-instruction disambiguation rule, messy-phrasing/voice-transcript guidance) and prove improvement with literal before/after evidence on a varied real test set. Prior initiative (adapt-compass-pattern-d1-and-user-lock) archived to FIX_STATE_v3_archive.json.",
+  "reference_notes": {
+    "compass_files_read": [
+      "compass/src/ai/systemPrompt.ts (full)",
+      "compass/src/ai/agent.ts (pattern confirmed in earlier round; this round is about PROMPT QUALITY)"
+    ],
+    "quality_bar_from_compass": "Compass's buildSystemPrompt gives ~210 lines of behavioral guidance on top of injected live state: named disambiguation rules stated as explicit contrasts (pause_task vs cancel_task with example phrases on each side), explicit 'USE THE TOOL, don't just describe what you'd do', fuzzy-matching instructions with a ONE-clarifying-question fallback for ambiguous matches, per-domain worked scenarios (user says they finished something -> fuzzy-match open tasks -> status=done), and explicit reasoning instructions for messy real-world signals (relative time anchoring, never guess, never hedge). Codex's dispatchSystemPrompt is currently 4 short bullets + 4 path bullets with NO worked examples and NO explicit note-vs-instruction rule.",
+    "codex_prompt_confirmed_current_state": "worker/src/gemini.js dispatchSystemPrompt(tree) lines 585-601: one-line role + injected tree + 3 classification bullets + 4 path-targeting bullets. The thin rule 'If the user gives you information without an explicit command, that is a note to save: call file_note' is exactly the unqualified phrasing that biases ambiguous/indirect messages toward file_note. file_note's own tool description ('Use whenever the user gives you content to remember... including when they just state a fact, idea, reminder or task with no explicit command') reinforces the same bias and is in scope for tightening."
+  },
   "session_history": [
     {
       "session": 1,
-      "date_utc": "2026-09-04",
-      "summary": "Seeded v7 state (superseding v5), studied Compass reference (agent.ts/gemini.ts/tools.ts/toolExecutor.ts) and current worker/src/gemini.js end-to-end."
-    },
-    {
-      "session": 1,
-      "date_utc": "2026-09-04",
-      "summary": "fix-01 evidence captured via harness running the Worker's OWN code (verbatim current prompt, exported gem() pipeline, real live KV key pool of 7 keys, real live tree). Recorded verbatim below."
-    },
-    {
-      "session": 1,
-      "date_utc": "2026-09-04",
-      "summary": "fix-02+03+04 implemented atomically: geminiOnce now returns full response data; new geminiData/geminiContent split; 5xx same-key-retry now rotates to next key; classifyAndDispatch replaced by a 4-round function-calling loop with 9 declared tools; executeDispatchTool routes to existing handlers with per-failure specific messages; tree.js filesUnderNode root fix; callbacks.js D:root whole-notebook branch; routeFreeText outer-catch message no longer the old generic string. autoFileNote/autoFilePhoto output budgets raised 256->2048 with thinkingBudget 512 after live evidence of truncation ('no json in response')."
-    },
-    {
-      "session": 1,
-      "date_utc": "2026-09-04",
-      "summary": "Whole-round VERIFY passed: real routeFreeText executed end-to-end against the real live tree + real key pool (Telegram API intercepted for capture only). 6/6 inputs produced sensible, distinct, non-generic responses; literal outputs recorded below; auto-file side effect cleaned up (deleted new node plants, 1 file)."
-    },
-    {
-      "session": 2,
-      "date_utc": "2026-09-04",
-      "summary": "Implemented the confirmed fix (waitUntil refuted in session 1; root cause = over-4096 editText silently swallowed + null-status TypeError + log-only outer catch). telegram.js: chunkText(4000) added; sendText chunks; editText chunks overflow into follow-up messages and its result is meaningful; tg() now logs ALL editMessageText 400s except the not-modified no-op. gemini.js: exported classifyAndDispatch + new replaceStatus() helper that downgrades to sendText whenever a status message is missing or an edit fails; applied to routeFreeText (text + photo), classifyAndDispatch all 3 terminal replies, and executeDispatchTool fail path. index.js: outer catch now sends the user a generic failure message (Compass safeSendError pattern) instead of log-only. Regression suite 17/17 passing."
-    },
-    {
-      "session": 2,
-      "date_utc": "2026-09-04",
-      "summary": "Live verification via worker/test/live-verify.mjs: real classifyAndDispatch + real key pool + real tree, Telegram API intercepted with real 4096 enforcement. gemini-flash-lite-latest 503 pool-wide (v7 saturation persists); gemini-flash-latest run PASS: editMessageText len=1292 replaced the placeholder. Initiative code work complete; production deploy left as the single human-review item (sandbox cannot wrangler deploy)."
-    },
-    {
-      "session": 3,
-      "date_utc": "2026-09-04",
-      "summary": "Step 0: pulled main (head dceab18), verified FIX_STATE.json, archived prior initiative fix-codex-silent-nonresponse into prior_initiatives, seeded new initiative remove-placeholder-and-fix-false-key-exhaustion."
-    },
-    {
-      "session": 3,
-      "date_utc": "2026-09-04",
-      "summary": "Read live code: gemini.js routeFreeText sends sendText(\"⏳ Working on it…\") at line ~362 then classifyAndDispatch edits it via replaceStatus/editText at ~10 call sites; photo branch sends \"⏳ Filing photo…\" at ~346. media.js ~144 deletes its own status message and delegates to routeFreeText which emits the placeholder. Read Compass reference end-to-end: handlers/webhook.ts processMessage -> sendChatAction(typing) -> runAgent -> ONE sendMessage(reply); src/ai/gemini.ts generate() rotates keys with header-free ?key= auth, model gemini-3.1-flash-lite, maxOutputTokens 2048 + thinkingBudget 512; no intermediate placeholder message anywhere in the Compass dispatch path."
-    },
-    {
-      "session": 3,
-      "date_utc": "2026-09-04",
-      "summary": "PART 1 COMPLETE: removed the \"⏳ Working on it…\" placeholder and its entire edit-in-place chain from the free-text dispatch path (and the \"⏳ Filing photo…\" placeholder). Dispatch replies, tool outcomes and failures are delivered directly via a new deliver() helper; only genuinely long-running sub-operations (PDF render, Gemini entry edit) keep their own purpose-named interim messages. media.js non-explicit document path reworked so its \"Reading file…\" message is consumed in place by deterministic fast-paths or deleted before Gemini dispatch. Regression suite (silent-nonresponse.test.mjs) updated to the deliver() contract: 17/17 passing."
-    },
-    {
-      "session": 3,
-      "date_utc": "2026-09-04",
-      "summary": "PART 2 INVESTIGATION COMPLETE with real captured evidence (harnesses committed at worker/test/diag/: kv.mjs pool/cursor reader, keys.mjs per-key status/body sweep across 3 models + Compass-shape comparison, gemini-data.mjs REAL geminiData() rotation reproduction). Reproduced the exact allKeysFailed throw on the configured model; identified corrupted doubled-paste key [4]; confirmed model-side 503 saturation as the false-negative driver; refuted KV-path mismatch, pool race, and waitUntil-timing hypotheses."
-    },
-    {
-      "session": 4,
-      "date_utc": "2026-09-04",
-      "summary": "PART 2 FIX IMPLEMENTED: gemini.js geminiData gains a bounded single whole-pool retry after 1500ms backoff when a round saw ONLY 5xx saturation and zero key-specific failures; allKeysFailed error now carries keyFailures/saturated/poolExhaustedByKeyFailures; allFailedMessage renders a truthful saturation message (keys are fine, model overloaded) instead of the false quota-exhausted/invalid claim, and an accurate counted message for genuine key failures. router.js keys-flow paste parsing now splits on all whitespace so doubled-paste concatenations (the confirmed corrupted 106-char key[4]) can never enter the pool as one dead key. isKeyFailure untouched."
-    },
-    {
-      "session": 4,
-      "date_utc": "2026-09-04",
-      "summary": "PART 2 TESTS + LIVE VERIFICATION BOTH PARTS COMPLETE: false-key-exhaustion.test.mjs 24/24 (stubbed Gemini API reproducing every confirmed scenario); silent-nonresponse.test.mjs 17/17 still passing (41/41 total). Live verify Part 1 PASS (one direct sendMessage, zero placeholders, zero edit cycles, real pool/tree/API). Live verify Part 2 PASS on the production model (503 wave + pre-existing corrupted key[4] absorbed, real reply delivered). Pre-existing corrupted key[4] (106-char doubled paste) and the saturated GEMINI_MODEL=gemini-flash-lite-latest alias remain as operator-facing notes (production data/config not mutated from a session)."
-    },
-    {
-      "session": 4,
-      "date_utc": "2026-09-04",
-      "summary": "DEPLOY VERIFIED + INITIATIVE COMPLETE: GitHub Actions Deploy Worker runs for 697fbb5, 6b68945, 8d800b5 all completed success; Cloudflare deployments API shows matching wrangler deployments at 15:45:21Z, 15:51:59Z, 15:57:06Z; live GET https://codex-bot.vjumbo264.workers.dev/ answering. fixes_complete=true."
+      "date_utc": "2026-09-06",
+      "summary": "Step 0: pulled main (head 9bed76a), verified prior FIX_STATE.json fixes_complete=true, archived it to FIX_STATE_v3_archive.json, seeded this v10 round state. Read worker/src/gemini.js in full (dispatchSystemPrompt 585-601, DISPATCH_TOOLS 501-583, classifyAndDispatch loop 609-665, executeDispatchTool 671-750) and Compass src/ai/systemPrompt.ts in full. Live notebook tree currently has one topic 'life-revelations' (0 entries after latest delete) — harness will seed temporary topics/entries for entry-targeted tests and clean them up afterwards."
     }
   ],
   "fixes": [
     {
       "id": "fix-01",
-      "status": "done",
-      "name": "Confirm exact failure mode with real captured evidence",
-      "files": [
-        "worker/src/gemini.js"
-      ],
-      "commits": [
-        "this push"
-      ],
-      "reproduced_failure_literal": "Verbatim current-prompt runs (configured model gemini-flash-lite-latest): all three inputs -> 'Error: Gemini 503: This model is currently experiencing high demand' (one-shot same-key retry hit the same 503, then bubble). Same prompt on gemini-flash-latest: 'Hi tell me something abstract' -> raw response literally '{\"action\":\"note\",\"text\":\"' (TRUNCATED mid-string at the 300-token cap) -> parseJsonLoose threw 'no json in response'. Every one of these paths lands in the same routeFreeText outer catch -> '❌ I could not handle that. Try a command from /help.' — the exact message the operator captured on all three inputs.",
-      "root_cause": "Structural: (1) a demanded-strict-JSON hand-parsed classifier has no valid shape for non-actionable input, so prose/truncation/fences all throw; (2) maxOutputTokens 300 is eaten by thinking tokens on current models, truncating JSON mid-stream; (3) 503s were retried once on the SAME key then bubbled to the generic catch; (4) one catch for every category => one opaque message.",
-      "fix": "Evidence only (rebuild is fix-02). Also confirmed gemini-flash-lite-latest 503-saturated, gemini-2.5-flash-lite and gemini-2.0-flash-lite RETIRED (404 no longer available), gemini-flash-latest healthy — model health is a live variable, hence the 5xx rotation hardening in fix-02.",
-      "tested": "harness/fix01.mjs captured all raw responses verbatim before parseJsonLoose.",
-      "concerns": "The live bot's configured model (wrangler [vars] GEMINI_MODEL=gemini-flash-lite-latest) was returning 503s at evidence time; the new 5xx-rotation across the 7-key pool absorbs this far better, but the operator may want to point GEMINI_MODEL at gemini-flash-latest if the lite alias stays saturated. Not changed in code — runtime config."
+      "status": "in_progress",
+      "name": "Gather real before-evidence across a varied test set",
+      "files": ["worker/test/dispatch-before-after.mjs"],
+      "commits": [],
+      "plan": "Harness runs the REAL exported classifyAndDispatch against the REAL D1 key pool (read via Cloudflare API, masked in output), the REAL live notebook tree (GitHub API), real Gemini API (model per env, default production gemini-flash-lite-latest with fallback gemini-flash-latest on saturation), with ONLY the Telegram Bot API intercepted to capture which tool fired with what args. Test set: >=6 inputs covering indirect/conversational delete, read, edit, export requests + genuine conversational notes (must-stay-file_note) + transcript-shaped messy phrasings (filler words, false starts, run-on, minimal punctuation). Any test-created topics/entries are deleted afterwards and cleanup commits noted.",
+      "before_results": [],
+      "after_results": [],
+      "notes": ""
     },
     {
       "id": "fix-02",
-      "status": "done",
-      "name": "Rebuild classifyAndDispatch on real Gemini function-calling (Compass pattern)",
-      "files": [
-        "worker/src/gemini.js"
-      ],
-      "commits": [
-        "this push"
-      ],
-      "reproduced_failure_literal": "See fix-01.",
-      "root_cause": "See fix-01.",
-      "fix": "tools:[{functionDeclarations:[file_note, read_topic, export_pdf, delete_topic, delete_everything, delete_entry, edit_entry, browse_topics, help]}] with JSON-schema params; systemInstruction carries the tree + targeting rules (no more giant inline prompt); 4-round loop: geminiContent returns raw model content, functionCall parts execute via executeDispatchTool against the EXISTING handlers (autoFileNote, sendReadPage, doExport, confirmDeleteKeyboard flows, handleEntryAction), functionResponse parts feed back; zero calls => model text sent directly as the reply; fallbacks: missing content 'I'm here — could you say that again?', empty text 'lost my train of thought', round exhaustion 'I hit a snag thinking that through', per-tool failure 'That <tool> failed (<reason>). Nothing was changed'; all-terminal calls end in ONE round (quota-min principle); geminiOnce returns full data; 5xx now rotates keys after one same-key retry; legacy gemini() text-join preserved for transcription/auto-file/rewrite callers; deletes present confirm/cancel keyboards only — no auto-delete.",
-      "tested": "Live end-to-end (real code, real tree, real keys): 'Hi tell me something abstract' -> conversational reply ('Consider how a shadow is not an object...'), no tool call, no error; full 6-input matrix in verify section.",
-      "concerns": "One pool key (index 4) returned 401 during verification — rotation absorbed it transparently; operator may want to remove that dead key via Settings."
+      "status": "pending",
+      "name": "Rewrite dispatchSystemPrompt with Compass-quality reasoning guidance",
+      "files": ["worker/src/gemini.js"],
+      "commits": [],
+      "plan": "Expand dispatchSystemPrompt(tree): keep role line, live tree injection, and the 4 path-targeting rules verbatim; add (1) an explicit named NOTE vs INSTRUCTION disambiguation rule with 2-3 contrasting worked examples on each side including borderline phrasings; (2) explicit statement that grammatical mood (imperative vs declarative) is a WEAK signal — weigh semantic intent, especially for transcribed speech; (3) explicit messy-phrasing guidance (filler words, false starts, run-ons, missing punctuation do NOT by themselves make something a note — reason about what the message actually asks for); (4) USE THE TOOL reinforcement. Also tighten file_note's tool description so it is reserved for genuine content-to-remember and is NOT the catch-all for ambiguous messages (ambiguity about WHICH action -> best-guess action or ask ONE short question; ambiguity only about note target is file_note's job).",
+      "notes": ""
     },
     {
       "id": "fix-03",
-      "status": "done",
-      "name": "Whole-notebook delete as a proper tool (delete_everything)",
-      "files": [
-        "worker/src/gemini.js",
-        "worker/src/tree.js",
-        "worker/src/callbacks.js"
-      ],
-      "commits": [
-        "this push"
-      ],
-      "reproduced_failure_literal": "'Delete all topics' -> 503-bubble -> generic error (fix-01 evidence); even when the model answered, there was NO whole-notebook action shape at all.",
-      "root_cause": "No such action existed; root deletion was also physically broken: filesUnderNode('') produced prefix 'notebook//' (never matches) and the callbacks D: branch assumed a non-root path (would have thrown path.split on null).",
-      "fix": "Declared delete_everything tool (no path param); presents confirm keyboard 'D:root' with scoped warning naming the count ('all N topics and every entry inside them'); tree.js filesUnderNode uses 'notebook/' prefix for root; callbacks.js D: branch handles path '' with a whole-notebook confirmation result message.",
-      "tested": "Live: 'Delete all topics' -> '⚠️ Delete the ENTIRE notebook — all 2 topics and every entry inside them? This cannot be undone (recoverable only via git history).' with buttons [✅ Yes, delete EVERYTHING => D:root | ❌ Cancel => c:0 | 🏠 Home]. Nothing deleted without the tap (tree snapshot unchanged after run).",
-      "concerns": "Confirm callback D:root executes deleteNodeTree('') which deletes every file under notebook/ — verified code path, intentionally NOT executed against the live notebook for obvious reasons; single-topic D: path logic unchanged."
-    },
-    {
-      "id": "fix-04",
-      "status": "done",
-      "name": "Exact-name topic delete ('morning') resolves under new architecture",
-      "files": [
-        "worker/src/gemini.js"
-      ],
-      "commits": [
-        "this push"
-      ],
-      "reproduced_failure_literal": "'Delete the topic called morning' -> 503-bubble -> generic error (fix-01 evidence).",
-      "root_cause": "Dispatch-level only: resolvePath handles 'morning' correctly (exact child-of-root leaf match); the v6 hypothesis about topics-with-children did not reproduce — the failure was entirely the JSON/503 collapse.",
-      "fix": "None needed beyond fix-02; verified directly as required instead of assumed.",
-      "tested": "Live: 'Delete the topic called morning' -> '⚠️ Delete topic \"morning\" (morning) and everything inside?' with [✅ Yes, delete topic => D:45a21e4b | ❌ Cancel | 🏠 Home] — correct node handle, correct scope, confirm-gated.",
-      "concerns": null
+      "status": "pending",
+      "name": "Re-validate against the exact fix-01 test set and confirm measurable improvement",
+      "files": ["worker/test/dispatch-before-after.mjs", "FIX_STATE.json"],
+      "commits": [],
+      "plan": "After fix-02 deploys (GitHub Actions -> Cloudflare Workers Builds on push to main), re-run the EXACT SAME inputs through the same harness and record literal after-results next to before-results. Pass = every previously-misfiring instruction input now triggers its matching tool with sensible args, genuine-note inputs still call file_note (no regression), transcript-shaped inputs classified by intent not surface phrasing. Iterate on the prompt if any input still fails. Verify manual commands/buttons/PDF export untouched (this round changes only dispatchSystemPrompt content + possibly tool descriptions).",
+      "notes": ""
     }
-  ],
-  "verify_evidence": {
-    "method": "Real worker/src/gemini.js routeFreeText executed in Node harness against the REAL live notebook tree and REAL live KV Gemini key pool; only the Telegram Bot API was intercepted (message capture). Same minimum-evidence standard as prior rounds (no chat_id injectable under the active webhook). Harness model gemini-flash-latest (configured lite alias 503-saturated at test time — see fix-01).",
-    "inputs_and_literal_outputs": [
-      "'Hi tell me something abstract' -> editMessageText: 'Consider how a shadow is not an object, yet it moves, changes shape, and exists only because light was interrupted on its way to somewhere else... If you'd like to jot down any thoughts, ideas, or reminders, just send them over and I can save them to your notebook!' (conversational, no tool, no error)",
-      "'Delete all topics' -> '⚠️ Delete the ENTIRE notebook — all 2 topics and every entry inside them? This cannot be undone (recoverable only via git history).' + [Yes, delete EVERYTHING => D:root | Cancel | Home]",
-      "'Delete the topic called morning' -> '⚠️ Delete topic \"morning\" (morning) and everything inside?' + [Yes, delete topic => D:45a21e4b | Cancel | Home]",
-      "'Read morning' -> '📖 Here it is:' then the morning › random read page with its real entry (…jh2t 'Create a new random note') and entry action buttons",
-      "'remember to water the monstera on Saturday' -> '✅ Created new topic \"plants\" (plants) and filed the note there as entry 20260904-124014-lkua.' + [View | Move | New topic] (side effect cleaned up: deleted node plants)",
-      "'what do you think about the color of Tuesday?' -> multi-paragraph conversational answer ending 'What color does Tuesday feel like to you?...' (no tool, no error)"
-    ],
-    "generic_error_reachable": false,
-    "delete_safety": "Both delete paths only PRESENTED confirm keyboards; tree snapshot before/after identical (nothing deleted without a tap).",
-    "manual_command_path": "Untouched: router/commands/keyboards/read/export/pdf modules have zero diff except the scoped callbacks.js D: root branch and tree.js prefix fix.",
-    "cleanup": "deleted new node plants (1 files) — live tree restored to morning, morning/random + entry jh2t"
-  },
-  "initiative": "adapt-compass-pattern-d1-and-user-lock",
-  "current_step": "complete",
-  "live_verification": {
-    "part1_result": "PASS — sendChatAction('typing') accepted by live Bot API for chat 6339561761; grep-verified ZERO live '⏳' placeholder sends in worker/src; regression suites assert native typing fires before dispatch and creates no message (23/23 silent-nonresponse).",
-    "part2_result": "PASS — codex_db provisioned (ae30162f-069f-43ca-b9cb-1c6b852ad2fb); sqlite_master shows api_keys/key_pool_state/sys_state; 7 keys migrated from KV with pool state; key-pool rotation regression suite re-run against a D1 stub instead of KV mocks (32/32 false-key-exhaustion incl. new D1 remove/clear/last_ok round-trip + loud-missing-binding tests).",
-    "part3_result": "PASS (simulated updates) — user-lock.test.mjs 28/28: unauthorized text/photo/voice/document/callback each get exactly one refusal with ZERO D1 access, ZERO Gemini calls, ZERO file downloads, no command sync; fail-closed when var unset; wrong secret still bare 403; authorized /help routes normally. Live edge: wrong-secret POST to https://codex-bot.vjumbo264.workers.dev/ -> 403. Second real Telegram account not available in-session — covered by constructed-update tests per contract fallback."
-  },
-  "tests_added": [
-    "worker/test/user-lock.test.mjs (28 assertions)",
-    "worker/test/false-key-exhaustion.test.mjs ported KV mocks -> D1 stub + 8 new D1 storage assertions (32 total)",
-    "worker/test/silent-nonresponse.test.mjs +6 typing-indicator assertions (23 total)",
-    "worker/test/ttf-hooks.mjs (module.register split of ttf-loader for Node 22)"
-  ],
-  "full_suite_passing": true,
-  "human_review_items": [
-    "The legacy CODEX_KV namespace (f1ad0d7e…) still exists on the account as a backup of the key pool; delete it manually once the D1 pool is verified in production.",
-    "Pre-existing dead pool key (the 106-char doubled paste, index 4) was carried into D1 as-is (faithful migration); remove it via /menu → ⚙️ Settings → 🔑 Gemini API keys.",
-    "GEMINI_MODEL=gemini-flash-lite-latest remains the saturated alias from prior initiative — consider gemini-flash-latest or gemini-3.1-flash-lite (both returned 200 on the same keys)."
-  ],
-  "resume_from": {
-    "file": "",
-    "component": "",
-    "next_operation": "INITIATIVE COMPLETE — all three parts implemented, D1 provisioned + data migrated + verified live, 83/83 tests passing, pushed (e54b860 + this checkpoint)."
-  },
-  "prior_initiatives": [
-    {
-      "initiative": "fix-codex-silent-nonresponse",
-      "current_step": "complete",
-      "investigation": {
-        "waitUntil_call_chain_confirmed": "index.js fetch(): after secret+json checks, ctx.waitUntil(async()=>{ syncCommandMenu; routeMessage/routeCallbackQuery }) then returns Response('ok',200) IMMEDIATELY — the Response does NOT await the work. routeMessage->routeFreeText (gemini.js) is inside that waitUntil. Production tail evidence: a signed synthetic free-text POST produced a full log trail ('telegram sendMessage -> 400 chat not found', 'gemini dispatch failed', 'update handling failed') from inside the waitUntil-deferred block — i.e. the waitUntil work RAN TO COMPLETION in production and was NOT killed mid-flight. So 'waitUntil deferral gets silently torn down' is REFUTED for this code path.",
-        "compass_comparison_result": "The contract's premise is FALSE. Compass src/index.ts stashes ctx on globalThis.__ctx then returns handleWebhook(req,env); handlers/webhook.ts processMessage work is wrapped and handed to ctx.waitUntil(work) (line ~88) — Compass DOES use waitUntil in the webhook/fetch path, structurally identical to Codex. waitUntil therefore cannot be the differentiator. Other structural differences noted: (a) Compass's outer failure handler calls safeSendError() to message the user on total failure; Codex's index.js catch only console.error's (no user-visible message). (b) Compass services/telegram.ts sendMessage returns Promise<number|null> and guards firstMsgId (never an unguarded .message_id deref). (c) Compass wrangler.toml has compatibility_flags=['nodejs_compat']; Codex has none (not implicated). (d) Compass runs GEMINI_MODEL=gemini-3.1-flash-lite; Codex runs gemini-flash-lite-latest (the model FIX_STATE v7 recorded as 503-saturated at evidence time).",
-        "other_swallowed_errors_found": [
-          "index.js:40-43 outer catch does ONLY console.error('update handling failed') — no sendText to the user. Any error escaping routeMessage/routeFreeText (including the TypeError below) results in total user silence. This is the sink that produces the observed 'ack then nothing'.",
-          "telegram.js tg() returns null on ANY non-OK Telegram response (sendMessage/editMessageText). A null result is only logged, never thrown, so callers that deref result.message_id throw a TypeError OUTSIDE their try/catch.",
-          "gemini.js:359 sendText('⏳ Working on it…') is OUTSIDE the try (try begins line 360); line 361 status.message_id throws if sendText returned null."
-        ],
-        "confirmed_root_cause": "PRIMARY (real-chat): Codex's conversational dispatch replies can exceed Telegram's 4096-char message cap; worker/src/telegram.js editText() passes the oversized text straight to editMessageText with NO chunking, and tg() converts the resulting 400 'message is too long' into a silent null (telegram.js:13 even suppresses the error log for editMessageText 400s). classifyAndDispatch (gemini.js:519) awaits editText(statusMessageId, reply) and never checks the null result, so the '⏳ Working on it…' placeholder is never replaced -> ack then total silence. EVIDENCE: live call to the configured model gemini-flash-lite-latest with the real function-calling dispatch payload returned a 9492-character reply (overTelegram4096=True). Compass's services/telegram.ts sendMessage chunks at 4000 chars and returns a guarded Promise<number|null>, so Compass never strands a placeholder — this is the actual behavioral difference, NOT waitUntil. SECONDARY (proven in production logs): a signed synthetic free-text POST showed sendText('⏳ Working on it…') is OUTSIDE the try (gemini.js:359), so when sendText returns null (Telegram send failure) line 361 status.message_id throws a TypeError that escapes the inner catch and lands in index.js's log-only outer catch -> silence. AGGRAVATOR: gemini-flash-lite-latest returned 503 on 3/4 live calls (model saturation, matching FIX_STATE v7's note); the swallowed-edit path turns even a retry-exhausted error message into silence. waitUntil was REFUTED as a cause: Compass uses ctx.waitUntil in the same webhook path and the production tail showed the waitUntil work running to completion."
-      },
-      "fix": {
-        "status": "complete",
-        "approach": "Match Compass's guarantees: (1) add chunkText-based splitting (4000-char) to telegram.js and use it in sendText; make editText chunk too and RETURN whether the edit succeeded, and make tg() log editMessageText failures (stop the silent-400 suppression except 'message is not modified'); (2) classifyAndDispatch: fall back to sendText when the edit returns null so the reply is never lost; (3) routeFreeText/photo/tap-edit: null-safe status (status && status.message_id) and wrap the status send inside the try with a sendText fallback; (4) index.js outer catch: sendText the user a generic failure message (Compass safeSendError pattern) instead of log-only.",
-        "commits": [
-          "this push"
-        ]
-      },
-      "live_verification": {
-        "performed": true,
-        "result": "worker/test/live-verify.mjs executed the REAL worker/src/gemini.js classifyAndDispatch against the REAL live KV key pool (7 keys) and the REAL live notebook tree, with the Telegram Bot API intercepted but enforcing the REAL 4096-char cap. Model availability note: configured alias gemini-flash-lite-latest returned 503 UNAVAILABLE on the whole pool at verification time (matching the v7 fix-01 saturation record); the same live run with GEMINI_MODEL=gemini-flash-latest completed: telegram calls captured = [{\"method\":\"editMessageText\",\"len\":1292}] — the placeholder WAS replaced by a visible, 4096-safe reply. LIVE VERIFY PASS. The regression suite (17/17) covers the primary root cause deterministically: a 9492-char reply now edits the placeholder (4000-char first chunk) plus 2 follow-up chunks, zero calls over 4096, genuine edit 400s logged, not-modified no-op quiet, replaceStatus falls back to sendText on null status/failed edit. Full end-to-end production verification (signed webhook POST against the live deployed Worker) is pending deploy — the sandbox cannot run wrangler deploy, and the operator must NOT message the bot before the fixed code is deployed or the old bug still stands."
-      },
-      "tests_added": [
-        "worker/test/silent-nonresponse.test.mjs (17 assertions, all passing)",
-        "worker/test/ttf-loader.mjs (Node ESM shim for wrangler Data-rule .ttf imports)",
-        "worker/test/live-verify.mjs (live harness: real classifyAndDispatch vs real key pool, Telegram API intercepted with real 4096 enforcement)"
-      ],
-      "full_suite_passing": true,
-      "human_review_items": [
-        "DEPLOY (required to close the user-visible symptom): cd worker && CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... node ../scripts/predeploy.mjs wrangler.toml && npx wrangler deploy — then send the bot a free-text message and confirm a reply follows the ack. The fix is committed (e5117ef) and pushed but NOT deployed from this session.",
-        "Consider GEMINI_MODEL=gemini-flash-latest in wrangler [vars]: gemini-flash-lite-latest was 503-saturated pool-wide during live verification.",
-        "Pool key index 4 (…yMQw) returned 401 again during live verification — still dead; remove via Settings."
-      ],
-      "resume_from": {
-        "file": "FIX_STATE.json",
-        "component": "initiative",
-        "next_operation": "none — investigation + fix + tests + harness-level live verification complete; only production deploy remains (human_review_items)"
-      }
-    },
-    {
-      "initiative": "remove-placeholder-and-fix-false-key-exhaustion",
-      "current_step": "complete",
-      "live_verification": {
-        "part1_performed": true,
-        "part1_result": "PASS — worker/test/live-verify-part1.mjs executed the REAL routeFreeText() against the REAL live KV key pool (7 keys), the REAL live notebook tree (real GITHUB token), and the REAL Gemini API (gemini-flash-latest, isolating Part 1 from the lite alias saturation), with the Telegram Bot API intercepted for capture. Input: \"Hi — what do you think about the color of Tuesday?\" -> captured telegram calls: EXACTLY ONE sendMessage (len=369, \"Tuesday often feels like a soft, muted yellow or perhaps a g…\"), ZERO placeholder-pattern messages, ZERO editMessageText edit cycles. Compass one-message shape confirmed live. Code-level check: no sendText/editText placeholder call remains in the dispatch path (grep confirms only purpose-named interim messages for genuinely long operations: PDF render, entry edit).",
-        "part2_performed": true,
-        "part2_result": "PASS — worker/test/live-verify-part2.mjs executed the REAL post-fix geminiData() rotation loop against the REAL live KV key pool and REAL Gemini API on the PRODUCTION CONFIGURED model gemini-flash-lite-latest. Captured attempts: 8x 503 UNAVAILABLE \"high demand\" (four healthy keys, attempt + same-key retry each), 1x 401 UNAUTHENTICATED on the pre-existing corrupted doubled-paste key[4] (106 chars), then 200 OK on key[5] — RESULT: SUCCESS, model replied \"OK\". Under the pre-fix code this exact sequence collapsed into the false \"quota exhausted or keys invalid\" error (prior session captured that exact throw); post-fix the rotation routes around the dead key and absorbs the live 503 wave. The error path itself is covered deterministically by the regression suite (truthful saturation message asserted)."
-      },
-      "tests_added": [
-        "worker/test/false-key-exhaustion.test.mjs (24 assertions, all passing): 503-wave absorption via bounded whole-pool backoff retry; persistent-saturation truthful message (must NOT claim quota-exhausted/invalid); genuine all-dead pool keeps accurate counted key-failure message; mixed pool rotates past dead key AND absorbs 503 wave; 429 immediate rotation unchanged; no-key-failure/no-saturation honest generic; KeyPoolError precedence; addKeys doubled-paste/whitespace hygiene + idempotency.",
-        "worker/test/live-verify-part1.mjs (live harness: placeholder-free dispatch proof)",
-        "worker/test/live-verify-part2.mjs (live harness: real pool + real API rotation proof)"
-      ],
-      "full_suite_passing": true,
-      "human_review_items": [
-        "OPERATOR: remove the corrupted doubled-paste key (Settings -> Gemini API keys, the entry shown with doubled length) or re-paste key #5; the pool currently holds 6 valid keys + 1 dead concatenation. Rotation routes around it, but removing it avoids a wasted 401 attempt per sweep.",
-        "OPERATOR: GEMINI_MODEL=gemini-flash-lite-latest experiences repeated pool-wide 503 saturation waves; consider gemini-flash-latest or gemini-3.1-flash-lite (both 200 on the same keys during evidence capture). The code now absorbs transient waves, but a healthy model removes the retry delay entirely."
-      ],
-      "resume_from": {
-        "file": "",
-        "component": "",
-        "next_operation": "INITIATIVE COMPLETE — both parts fixed, regression-tested (41/41), live-verified, deployed (wrangler deployments 2026-09-04T15:45/15:51/15:57Z, Actions runs for 697fbb5/6b68945/8d800b5 all success, live GET probe answering)."
-      },
-      "part1_placeholder_removal": {
-        "call_sites_found": [
-          "gemini.js routeFreeText: sendText(\"⏳ Working on it…\") placeholder + classifyAndDispatch edit-in-place chain (REMOVED — dispatch now called with null status id, results delivered via deliver() as plain sendText)",
-          "gemini.js routeFreeText photo branch: sendText(\"⏳ Filing photo…\") (REMOVED — autoFilePhoto called with null, confirmation/failure is first message)",
-          "gemini.js autoFileNote: \"⏳ Filing…\" interim edit (REMOVED — files immediately, deliver()s the confirmation)",
-          "gemini.js classifyAndDispatch: replaceStatus/editText replies at no-content, no-call (text reply), round-exhaustion, executeDispatchTool fail, read_topic, delete_topic, delete_everything, browse_topics, help (all converted to deliver())",
-          "gemini.js handleEntryAction: not-found/no-entries/unidentifiable/delete-confirm via deliver(); edit mode keeps its own purpose-named \"⏳ Editing…\" interim message (long-running Gemini rewrite) via send-then-edit",
-          "gemini.js executeDispatchTool export_pdf: keeps purpose-named \"⏳ Rendering PDF…\" interim message (long-running) and hands its id to doExport",
-          "media.js handleDocumentMessage non-explicit path: deleted the \"⏳ Filing…\" edit; passes statusMessageId of its \"⏳ Reading file…\" message into routeFreeText; routeFreeText returns true when a deterministic fast-path consumed that message in place, else media.js deletes it so the turn ends with exactly one message (Compass shape)",
-          "replaceStatus() helper REMOVED; new deliver() helper exported (edit-in-place when an interim id exists, plain sendText otherwise, sendText fallback on failed edit)"
-        ],
-        "message_id_dependents_found": [
-          "export.js doExport — status helper already null-safe (if (statusMessageId)); export_pdf branch now sends its own interim message and passes the real id",
-          "media.js handleDocumentMessage — updated in this change (see above)",
-          "media.js handleVoiceMessage explicit path + handlePhotoMessage explicit path — own status messages, untouched, unaffected",
-          "router.js tap-edit flow — maybeApplyTapEdit keeps its own \"⏳ Editing…\" status message from router.js, untouched",
-          "compass re-verification: handlers/webhook.ts processMessage -> sendChatAction(typing) -> runAgent -> exactly ONE sendMessage(reply); src/ai/gemini.ts generate() + src/ai/agent.ts contain no intermediate message send — placeholder-free dispatch CONFIRMED against current compass code"
-        ],
-        "status": "complete"
-      },
-      "part2_key_exhaustion": {
-        "investigation": {
-          "real_status_body_evidence": [
-            "Live KV read (Cloudflare API, namespace CODEX_KV f1ad0d7e…): gemini:keys = 7 keys […zN0A, …MPTA, …Yf_w, …Hw2A, …yMQw, …cOgw, …d-jw]; gemini:last_ok_idx=0; gemini:migrated=1. Pool read at request time IS the same KV key the Settings UI writes — same namespace, same gemini:keys path (keypool.js KEYS_KEY). Pool size 7 confirmed.",
-            "Key [4] …yMQw is 106 chars — exactly 2x the 53-char length of the other six — and returns HTTP 401 UNAUTHENTICATED on EVERY model (\"Request had invalid authentication credentials. Expected OAuth 2 access token…\"). It is a corrupted duplicate-paste: the contract's key list itself shows key #5 pasted twice with no newline (\"…yMQwAQ.Ab8RN6Ix1d…yMQw\"), and the addKeys parser splits pasted input per line, so the doubled line was stored as one bad key.",
-            "Per-key sweep, worker request shape (x-goog-api-key header, dispatch payload with tools + thinkingBudget 512): model gemini-flash-lite-latest -> key0 503 UNAVAILABLE, key1 503, key2 503, key3 503, key4 401 UNAUTHENTICATED, key5 200 OK (\"OK.\"), key6 503. Model gemini-flash-latest -> key0 503, key1 503, key2 200, key3 200, key4 401, key5 503, key6 200. Model gemini-3.1-flash-lite (Compass's configured model) -> 200 OK on six of seven keys (only key4 401).",
-            "REAL worker geminiData() rotation loop (imported verbatim from worker/src/gemini.js) against the REAL pool: model gemini-flash-lite-latest run 1 -> all 7 keys tried, six return 503 UNAVAILABLE twice each (same-key retry), key4 returns 401, loop exhausts and THROWS err.allKeysFailed=true \"all 7 Gemini key(s) failed for this request (last: Gemini 503: …high demand…)\" — the exact false \"all keys failed\" report the operator sees. run 2 (seconds later): key0 503 then 200 OK -> SUCCESS. gemini-flash-latest: 200 OK on first key both runs.",
-            "Compass request shape (?key= query param, otherwise identical payload) on gemini-flash-lite-latest returns the identical 503 UNAVAILABLE — the auth transport (header vs query param) is NOT the differentiator."
-          ],
-          "hypothesis_tested": [
-            "H1 pool read from a different KV namespace/key than the UI writes -> REFUTED: request-time read and UI read share keypool.js gemini:keys in CODEX_KV; live read returns the same 7 keys the operator sees in Settings.",
-            "H2 model/payload shape difference vs Compass (model version the keys are not provisioned for) -> CONFIRMED as the primary driver: the 503s are MODEL-side saturation (\"This model is currently experiencing high demand\"), not key rejection — identical on every key and on Compass's own request shape. Codex runs GEMINI_MODEL=gemini-flash-lite-latest (and gemini-flash-latest shows the same per-key 503 flakiness); Compass runs gemini-3.1-flash-lite, on which the same keys return 200. So \"same keys work on Compass\" because Compass asks a healthy model, not because the keys differ.",
-            "H3 keys.length race leaving an empty/partial pool -> REFUTED: pool read is a single awaited KV get; live reproduction loaded all 7 keys every run; the failure reproduced with a full 7-key pool, so it is intermittent (503-lottery), not a partial-read artifact.",
-            "H4 waitUntil-removal/timing interaction breaking KV reads -> REFUTED: geminiData receives a fully-resolved pool (getKeys awaited before the loop); reproduction shows the loop iterating all 7 keys — KV reads complete fine; the allKeysFailed throw happens AFTER the full sweep, not from an empty pool.",
-            "H5 (discovered during evidence collection) corrupted pool entry -> CONFIRMED: key[4] is a doubled-paste 106-char string that hard-fails 401 on every model; rotation absorbs it (skips to next key) but it burns one pool slot and one attempt per full sweep."
-          ],
-          "confirmed_root_cause": "The \"❌ Every configured Gemini API key failed\" report fires when geminiData() exhausts the pool on gemini-flash-lite-latest, whose real per-attempt outcome is a saturated-model 503 UNAVAILABLE lottery (captured live: 503 on 6/7 keys x2 attempts each, then a clean 200 on the very next run seconds later). isKeyFailure() correctly classifies 503 as NOT key-specific, but the loop treats a persistent 503 the same as a dead key — rotate and count toward exhaustion — so a burst of model-side 503s across the pool collapses into the all-keys-failed error whose message falsely claims \"quota exhausted or keys invalid\". Two aggravators: (a) pool key [4] …yMQw is a corrupted doubled-paste (106 chars) that 401s on every model, wasting a slot; (b) Codex is pinned to the saturated gemini-flash-lite-latest alias while Compass — the operator's \"keys work fine\" reference — runs gemini-3.1-flash-lite, on which the identical keys return 200."
-        },
-        "fix": {
-          "status": "complete",
-          "approach": "(1) geminiData now gives a pool whose ENTIRE round failed only on 5xx saturation (zero key-specific failures) ONE bounded whole-pool retry after a 1500ms backoff — live evidence (diag/gemini-data.mjs) showed the identical request succeeding seconds later on the same pool, so a transient model-side 503 wave no longer collapses straight into allKeysFailed. (2) The thrown allKeysFailed error now carries keyFailures/saturated tallies and a poolExhaustedByKeyFailures flag; allFailedMessage uses them to tell the truth: saturation-only pool -> \"model temporarily overloaded, NOT a key problem, keys are fine, try again in a minute\" instead of the false \"quota exhausted or keys invalid\"; genuine key failures -> accurate count of key-specific failures plus a note that any 503s seen were not key faults. (3) addKeys hygiene: the Settings -> Keys paste parser (router.js) now splits on ALL whitespace, not just newlines, so a doubled-paste with no newline (the confirmed 106-char key[4], 401 on every model) enters the pool as two valid keys instead of one permanently-dead concatenation. isKeyFailure() itself is unchanged — the fix targets the misclassification at the AGGREGATE level, exactly as confirmed by the captured evidence, not a loosening of per-attempt classification."
-        }
-      },
-      "archived_at_utc": "2026-09-04T22:20:00Z"
-    }
-  ],
-  "investigation": {
-    "compass_reverified_live": "src/handlers/webhook.ts: processMessage -> sendChatAction(env, chatId, 'typing') at line 117 -> runAgent ONCE -> exactly ONE sendMessage(reply); catch -> safeSendError. Compass does NOT re-send the typing indicator for long work (known limitation shared by both bots); Telegram auto-expires it after ~5s, so Codex re-sends on a 4s interval while dispatch runs (router.js withTyping). src/services/telegram.ts sendChatAction confirmed fire-and-forget native API call.",
-    "prior_sessions_confirmed": "waitUntil removal already merged (index.js awaits dispatch inline; commit 50efb3f re-upload kept it); placeholder removal from prior initiative confirmed: routeFreeText/classifyAndDispatch send no '⏳ Working on it…'. Remaining placeholder-class messages found this session: media.js '⏳ Reading file…'/'⏳ Saving photo…'/'⏳ Transcribing…'/'⏳ Filing…', router.js/gemini.js '⏳ Editing…', commands/callbacks/gemini '⏳ Rendering PDF…' — ALL removed in Part 1.",
-    "kv_inventory": [
-      "gemini:keys (JSON array of key strings) — keypool.js -> D1 api_keys",
-      "gemini:last_ok_idx (sticky rotation index) — keypool.js -> D1 key_pool_state",
-      "gemini:migrated (legacy-secret promotion flag) — keypool.js -> D1 key_pool_state",
-      "sys:cmd_synced (daily command-menu sync stamp) — telegram.js -> D1 sys_state",
-      "NO other KV usage anywhere in worker/src (grep-verified). Notebook content/tree/PDF data live in the GitHub repo via github.js — never in KV — so no D1 table needed for them."
-    ]
-  },
-  "part1_messaging_pattern": {
-    "placeholder_call_sites_removed": [
-      "media.js handleDocumentMessage: '⏳ Reading file…' + '⏳ Filing…' + deleteMessage cleanup — now direct sends/delegation, one message per turn",
-      "media.js handlePhotoMessage explicit path: '⏳ Saving photo…' send-then-edit -> single confirmation sendText",
-      "media.js handleVoiceMessage: '⏳ Transcribing…' + '⏳ Filing…' -> single confirmation/failure sendText",
-      "router.js tap-edit flow: '⏳ Editing…' placeholder + editText plumbing -> withTyping + maybeApplyTapEdit without status id",
-      "gemini.js maybeApplyTapEdit: statusMessageId param removed, editText -> sendText",
-      "gemini.js handleEntryAction edit branch: '⏳ Editing…' interim removed",
-      "gemini.js executeDispatchTool export_pdf: '⏳ Rendering PDF…' -> native upload_document chat action",
-      "commands.js /export + callbacks.js x:/X: '⏳ Rendering PDF…' -> native upload_document chat action",
-      "export.js doExport: '⏳ Gathering notes…'/'⏳ Sending PDF…' interim edits removed (signature kept, all callers pass null)"
-    ],
-    "typing_indicator": "telegram.js sendChatAction + typingTicker(4s interval, ~60s cap) + withTyping(); router.js wraps photo/voice/document/free-text turns ('record_voice' for voice). Compass parity confirmed: no placeholder message ever exists, nothing to edit or strand.",
-    "status": "complete"
-  },
-  "part2_d1_migration": {
-    "kv_inventory": "see investigation.kv_inventory (4 keys)",
-    "tables_designed": [
-      "api_keys (adapted from Compass api_keys: key_value UNIQUE, position, daily_quota, used_today, last_reset_date, is_active, consecutive_errors, last_error_message, last_used_at)",
-      "key_pool_state (last_ok_idx, migrated)",
-      "sys_state (cmd_synced)"
-    ],
-    "migrations_written": [
-      "migrations/0001_initial.sql (idempotent CREATE TABLE IF NOT EXISTS, Compass style)"
-    ],
-    "d1_provisioned": "codex_db id=ae30162f-069f-43ca-b9cb-1c6b852ad2fb created via Cloudflare API; tables verified live (api_keys, key_pool_state, sys_state); 7 KV keys + last_ok_idx + migrated flag carried into D1 (verified: 7 rows); scripts/predeploy.mjs extended for idempotent find-or-create + wrangler d1 migrations apply --remote + one-time KV->D1 carry; wrangler.toml [[d1_databases]] CODEX_DB stamped with real id; deploy.yml runs predeploy then wrangler deploy. KV binding and [[kv_namespaces]] removed from wrangler.toml; zero CODEX_KV runtime refs remain in worker/src.",
-    "call_sites_ported": [
-      "keypool.js (full rewrite to CODEX_DB, same exported API + loud KeyPoolError semantics)",
-      "telegram.js syncCommandMenu -> sys_state",
-      "gemini.js/router.js/callbacks.js/ui.js/media.js keypool callers unchanged (API preserved)"
-    ],
-    "kv_binding_removed": true,
-    "status": "complete"
-  },
-  "part3_user_lock": {
-    "entry_points_covered": [
-      "text messages",
-      "photo messages",
-      "voice/audio messages",
-      "document messages",
-      "callback_query (button taps — answered with refusal toast, no spinner hang)"
-    ],
-    "design": "index.js checks update.message.from.id / update.callback_query.from.id against AUTHORIZED_USER_ID var (provisioned 6339561761) BEFORE syncCommandMenu/routing/D1/Gemini; mismatch -> one short refusal message (+ answerCallbackQuery for taps), zero side effects; unset var fails CLOSED (refuses everyone).",
-    "status": "complete"
-  }
+  ]
 }
