@@ -17,7 +17,7 @@ Confidence attracts quality; pretending not to care attracts chaos
 <!-- e:20260906-090343-t7nh -->
 _2026-09-06 · 09:03 UTC_
 
-Never text first twice in a row
+Never text or call first twice in a row
 
 ---
 
