@@ -2,29 +2,38 @@
   "project": "codex",
   "repo": "https://github.com/vjumbo264/codex",
   "round": "persistent-session-dispatch-reasoning-quality-v10",
-  "fixes_complete": false,
-  "current_fix": "fix-02",
-  "last_updated_utc": "2026-09-06T09:05:00Z",
-  "round_summary": "Dispatcher reasoning-quality round: bring dispatchSystemPrompt's reasoning guidance up to Compass's systemPrompt.ts standard (worked examples, explicit note-vs-instruction disambiguation rule, messy-phrasing/voice-transcript guidance) and prove improvement with literal before/after evidence on a varied real test set. Prior initiative (adapt-compass-pattern-d1-and-user-lock) archived to FIX_STATE_v3_archive.json.",
+  "fixes_complete": true,
+  "current_fix": null,
+  "last_updated_utc": "2026-09-06T09:10:00Z",
+  "round_summary": "COMPLETE with genuine comparative evidence. fix-01 reproduced the dispatch reasoning failures on the REAL live pipeline (real exported classifyAndDispatch + real D1 key pool + real GitHub notebook tree + real Gemini, only Telegram intercepted): 16/18 correct, with TWO genuine reasoning failures recorded verbatim — S2 (a rhetorical self-reflection 'why do I always say yes to things I don't even want to do' was answered conversationally and NEVER SAVED, because the prompt's 'a question -> no tool' bullet overrode its own 'information without a command -> note' bullet) and S8 ('that long note about nonchalant people, pull that up' fired read_topic on the WRONG topic 'confidence' by title association instead of searching entry-content previews). fix-02 rewrote dispatchSystemPrompt to Compass's systemPrompt.ts standard: named note-vs-instruction rule with contrasting worked borderline examples on both sides, an explicit 'grammatical mood is a WEAK signal' rule, a messy-transcript rule, an entry-preview content-targeting rule, USE-THE-TOOL reinforcement, and a tightened file_note description (no longer the ambiguity catch-all). fix-03 re-ran the EXACT SAME 18 inputs after deploy: S2 and S8 both FIXED, all 16 previously-correct inputs still correct — 18/18. 83/83 regression tests pass throughout. Deploy verified via Cloudflare deployments API.",
   "reference_notes": {
     "compass_files_read": [
       "compass/src/ai/systemPrompt.ts (full)",
       "compass/src/ai/agent.ts (pattern confirmed in earlier round; this round is about PROMPT QUALITY)"
     ],
-    "quality_bar_from_compass": "Compass's buildSystemPrompt gives ~210 lines of behavioral guidance on top of injected live state: named disambiguation rules stated as explicit contrasts (pause_task vs cancel_task with example phrases on each side), explicit 'USE THE TOOL, don't just describe what you'd do', fuzzy-matching instructions with a ONE-clarifying-question fallback for ambiguous matches, per-domain worked scenarios (user says they finished something -> fuzzy-match open tasks -> status=done), and explicit reasoning instructions for messy real-world signals (relative time anchoring, never guess, never hedge). Codex's dispatchSystemPrompt is currently 3 classification bullets + 4 path bullets with NO worked examples and NO explicit note-vs-instruction rule.",
-    "codex_prompt_confirmed_current_state": "worker/src/gemini.js dispatchSystemPrompt(tree) lines 585-601: one-line role + injected tree + 3 classification bullets + 4 path-targeting bullets. Two thin rules directly implicated by before-evidence: (1) 'If the user gives you information without an explicit command, that is a note to save' collides with (2) 'a question -> do NOT call any function' — a rhetorical self-reflection question (S2) was treated as small talk and never filed. Path targeting rules say nothing about matching ENTRY CONTENT PREVIEWS for read requests — S8's content-described read ('that long note about nonchalant people') resolved to the wrong topic by title association.",
-    "voice_flow_confirmed": "media.js: voice/audio is transcribeAndClean'ed then routed through the SAME routeFreeText -> classifyAndDispatch path as typed text (confirmed lines 200-230). Transcripts arrive cleaned but still carry spoken register (hedges, false starts, run-ons) — so text-based harness testing with transcript-shaped inputs is representative."
+    "quality_bar_from_compass": "Compass's buildSystemPrompt gives ~210 lines of behavioral guidance on top of injected live state: named disambiguation rules stated as explicit contrasts (pause_task vs cancel_task with example phrases on each side), explicit 'USE THE TOOL, don't just describe what you'd do', fuzzy-matching instructions with a ONE-clarifying-question fallback, per-domain worked scenarios, and explicit reasoning instructions for messy real-world signals. Codex's old dispatchSystemPrompt was 3 classification bullets + 4 path bullets with NO worked examples.",
+    "what_changed_vs_compass_lesson": "The lesson taken from Compass was DEPTH AND SPECIFICITY (named contrasts, worked borderline examples on both sides, explicit weak-signal warnings), not literal content — Codex is a notebook, not a task manager. The pause-vs-cancel equivalent for Codex is note-vs-instruction, now stated as an explicit named rule with contrasting worked examples."
   },
   "session_history": [
     {
       "session": 1,
       "date_utc": "2026-09-06",
-      "summary": "Step 0: pulled main (head 9bed76a), archived completed prior FIX_STATE to FIX_STATE_v3_archive.json, seeded this v10 round state (commit 5fd7283). Read worker/src/gemini.js in full and Compass src/ai/systemPrompt.ts in full."
+      "summary": "Step 0: pulled main, archived completed prior FIX_STATE to FIX_STATE_v3_archive.json, seeded v10 round state (commit 5fd7283). Read worker/src/gemini.js and Compass src/ai/systemPrompt.ts in full."
     },
     {
       "session": 1,
       "date_utc": "2026-09-06",
-      "summary": "fix-01 DONE: built worker/test/dispatch-before-after.mjs (8 inputs) + worker/test/dispatch-stress.mjs (10 inputs) running the REAL exported classifyAndDispatch against the REAL D1 key pool (7 keys via Cloudflare API), the REAL live notebook tree (GitHub), real Gemini (production model gemini-flash-lite-latest), Telegram API intercepted. Temp topics seeded (grocery-list, trip-ideas, confidence) and cleaned up after each run; test-filed entries (appointments, airbnb, +1 in life-revelations) left filed as CORRECT dispatcher behavior evidence. Result: 16/18 correct; TWO genuine reasoning failures reproduced verbatim (see fix-01 before_results): S2 rhetorical-note-as-question answered conversationally instead of filed; S8 content-described read resolved to the WRONG topic. T4 note: export_pdf DISPATCHED correctly; its execution failed only in the sandbox (ttf-loader stubs fonts as empty ArrayBuffers so pdf-lib cannot render in Node — harness artifact, NOT a production defect)."
+      "summary": "fix-01: built worker/test/dispatch-before-after.mjs (8 inputs) + worker/test/dispatch-stress.mjs (10 inputs); ran against the live pipeline; recorded 16/18 correct with S2 and S8 failing verbatim. Harness commits pushed (33ed4df). Temp topics cleaned up after each run; correctly-filed test notes (appointments, airbnb, +1 life-revelations) left as evidence of correct dispatcher behavior."
+    },
+    {
+      "session": 1,
+      "date_utc": "2026-09-06",
+      "summary": "fix-02: rewrote dispatchSystemPrompt(tree) and tightened file_note's description in worker/src/gemini.js. 83/83 regression tests pass. Pushed as cd77b58; Cloudflare deployments API confirmed new deployments at 08:59:00Z and 08:59:17Z; worker GET / -> 200."
+    },
+    {
+      "session": 1,
+      "date_utc": "2026-09-06",
+      "summary": "fix-03: re-ran BOTH harnesses with the identical 18 inputs against the deployed fix. S2 FIXED (now file_note -> entry 20260906-090429-yurw under Confidence). S8 FIXED (read_topic now resolves to life-revelations, showing the actual nonchalant entry). All 16 other inputs still correct — zero regressions. 18/18. T4's 'Unknown font format' is a sandbox-only artifact (ttf-loader stubs fonts as empty ArrayBuffers so pdf-lib cannot render in Node); export_pdf DISPATCHED correctly in both runs and production renders the real bundled .ttf fonts — unchanged this round."
     }
   ],
   "fixes": [
@@ -33,47 +42,67 @@
       "status": "done",
       "name": "Gather real before-evidence across a varied test set",
       "files": ["worker/test/dispatch-before-after.mjs", "worker/test/dispatch-stress.mjs"],
-      "commits": ["this push"],
+      "commits": ["33ed4df"],
       "before_results": [
-        {"id": "T1-indirect-delete-topic", "input": "yeah so that grocery list thing, I don't really need it anymore, can you get rid of it", "expected": "delete_topic(grocery-list)", "before": "CORRECT: delete_topic -> sendMessage 'Delete topic \"grocery-list\" (grocery-list) and everything inside?' [confirm keyboard]"},
-        {"id": "T2-indirect-read", "input": "hmm what did I write down in my life revelations notes again?", "expected": "read_topic(life-revelations)", "before": "CORRECT: read_topic -> '📖 Here it is:' + read page of life-revelations"},
-        {"id": "T3-indirect-edit", "input": "in my trip ideas can you change the Lisbon bit to say March instead of February", "expected": "edit_entry(trip-ideas)", "before": "CORRECT: edit_entry -> '✏️ Updated entry 20260906-085008-3wwr in Trip Ideas ... cheap flights in March'"},
-        {"id": "T4-indirect-export", "input": "hey could you send me everything as a PDF, like the whole notebook", "expected": "export_pdf(all)", "before": "DISPATCH CORRECT: export_pdf fired (sendChatAction upload_document); execution failed ONLY in sandbox: 'Unknown font format' from ttf-loader's stubbed empty ArrayBuffer fonts — harness artifact, production renders real bundled .ttf"},
-        {"id": "T5-genuine-note", "input": "reminder that the dentist appointment got moved to Thursday at 3", "expected": "file_note", "before": "CORRECT: file_note -> new topic 'appointments', entry 20260906-085146-9yt0"},
-        {"id": "T6-genuine-note-conversational", "input": "I keep thinking that most of my best ideas show up when I'm walking, not at my desk", "expected": "file_note", "before": "CORRECT: file_note -> entry 20260906-085201-35ff under Life Revelations"},
-        {"id": "T7-transcript-delete-entry", "input": "um so yeah that oat milk thing on the grocery list uh I already got it so you can just like take that one off", "expected": "delete_entry(grocery-list)", "before": "CORRECT: delete_entry -> confirm keyboard for entry 20260906-085006-icqf (oat milk entry)"},
-        {"id": "T8-transcript-note", "input": "okay so uh quick thought before I forget, the wifi password for the airbnb is downstairs on the router thing", "expected": "file_note", "before": "CORRECT: file_note -> new topic 'airbnb', entry 20260906-085218-trrf"},
-        {"id": "S1-note-imperative-shaped", "input": "Never text first twice in a row", "expected": "file_note", "before": "CORRECT: file_note -> entry under Confidence"},
-        {"id": "S2-note-rhetorical", "input": "why do I always say yes to things I don't even want to do", "expected": "file_note", "before": "WRONG: NO tool call — replied conversationally ('That is such a relatable feeling — it's so easy to slip into people-pleasing...'). A self-reflection musing phrased as a rhetorical question hit the 'a question -> reply conversationally' bullet and was NEVER SAVED. This is a genuine note the user expected kept."},
-        {"id": "S3-note-self-talk-imperative", "input": "stop checking your phone first thing in the morning, seriously", "expected": "file_note", "before": "CORRECT: file_note -> entry under Confidence"},
-        {"id": "S4-note-advice-fragment", "input": "the trick with her is just consistency, not grand gestures", "expected": "file_note", "before": "CORRECT: file_note -> entry under Confidence"},
-        {"id": "S5-instruction-show-note-about-X", "input": "can you show me my notes about confidence", "expected": "read_topic(confidence)", "before": "CORRECT: read_topic -> read page of confidence"},
-        {"id": "S6-instruction-hedged-delete-topic", "input": "I think I want to delete that whole confidence topic, it's all just noise at this point", "expected": "delete_topic(confidence)", "before": "CORRECT: delete_topic -> confirm keyboard"},
-        {"id": "S7-instruction-transcript-edit", "input": "hey uh in the confidence one, the thing about not texting twice, add something about how it applies to calling too", "expected": "edit_entry(confidence)", "before": "CORRECT: edit_entry -> 'Never text or call first twice in a row'"},
-        {"id": "S8-instruction-transcript-read", "input": "wait what was that long note I did about like nonchalant people, pull that up", "expected": "read_topic(life-revelations)", "before": "WRONG TOPIC: read_topic fired but resolved to 'confidence' — the entry about nonchalant people lives in life-revelations. The model matched topic-TITLE vibes instead of searching the ENTRY CONTENT PREVIEWS shown in the tree listing."},
-        {"id": "S9-instruction-write-down-explicit", "input": "write this down: stop being so available to people who only call when they need something", "expected": "file_note", "before": "CORRECT: file_note -> entry under Confidence"},
-        {"id": "S10-instruction-delete-entry-transcript", "input": "so yeah um that entry in confidence about confidence attracting quality or whatever, actually scratch that, delete it", "expected": "delete_entry(confidence)", "before": "CORRECT: delete_entry -> confirm keyboard for entry 20260906-085341-4oe7"}
+        {"id": "T1-indirect-delete-topic", "input": "yeah so that grocery list thing, I don't really need it anymore, can you get rid of it", "expected": "delete_topic(grocery-list)", "before": "CORRECT: delete_topic confirm keyboard"},
+        {"id": "T2-indirect-read", "input": "hmm what did I write down in my life revelations notes again?", "expected": "read_topic(life-revelations)", "before": "CORRECT: read page of life-revelations"},
+        {"id": "T3-indirect-edit", "input": "in my trip ideas can you change the Lisbon bit to say March instead of February", "expected": "edit_entry(trip-ideas)", "before": "CORRECT: entry updated to March"},
+        {"id": "T4-indirect-export", "input": "hey could you send me everything as a PDF, like the whole notebook", "expected": "export_pdf(all)", "before": "DISPATCH CORRECT: export_pdf fired; execution failed only in sandbox (stubbed fonts)"},
+        {"id": "T5-genuine-note", "input": "reminder that the dentist appointment got moved to Thursday at 3", "expected": "file_note", "before": "CORRECT: filed under appointments"},
+        {"id": "T6-genuine-note-conversational", "input": "I keep thinking that most of my best ideas show up when I'm walking, not at my desk", "expected": "file_note", "before": "CORRECT: filed under life-revelations"},
+        {"id": "T7-transcript-delete-entry", "input": "um so yeah that oat milk thing on the grocery list uh I already got it so you can just like take that one off", "expected": "delete_entry(grocery-list)", "before": "CORRECT: delete_entry confirm keyboard"},
+        {"id": "T8-transcript-note", "input": "okay so uh quick thought before I forget, the wifi password for the airbnb is downstairs on the router thing", "expected": "file_note", "before": "CORRECT: filed under airbnb"},
+        {"id": "S1-note-imperative-shaped", "input": "Never text first twice in a row", "expected": "file_note", "before": "CORRECT: filed under Confidence"},
+        {"id": "S2-note-rhetorical", "input": "why do I always say yes to things I don't even want to do", "expected": "file_note", "before": "WRONG: NO tool call — replied conversationally ('That is such a relatable feeling...'), never saved. Rhetorical self-reflection hit the 'a question -> no tool' bullet."},
+        {"id": "S3-note-self-talk-imperative", "input": "stop checking your phone first thing in the morning, seriously", "expected": "file_note", "before": "CORRECT: filed under Confidence"},
+        {"id": "S4-note-advice-fragment", "input": "the trick with her is just consistency, not grand gestures", "expected": "file_note", "before": "CORRECT: filed under Confidence"},
+        {"id": "S5-instruction-show-note-about-X", "input": "can you show me my notes about confidence", "expected": "read_topic(confidence)", "before": "CORRECT: read page of confidence"},
+        {"id": "S6-instruction-hedged-delete-topic", "input": "I think I want to delete that whole confidence topic, it's all just noise at this point", "expected": "delete_topic(confidence)", "before": "CORRECT: delete confirm keyboard"},
+        {"id": "S7-instruction-transcript-edit", "input": "hey uh in the confidence one, the thing about not texting twice, add something about how it applies to calling too", "expected": "edit_entry(confidence)", "before": "CORRECT: entry updated"},
+        {"id": "S8-instruction-transcript-read", "input": "wait what was that long note I did about like nonchalant people, pull that up", "expected": "read_topic(life-revelations)", "before": "WRONG TOPIC: read_topic resolved to 'confidence' by title association; the nonchalant entry lives in life-revelations."},
+        {"id": "S9-instruction-write-down-explicit", "input": "write this down: stop being so available to people who only call when they need something", "expected": "file_note", "before": "CORRECT: filed under Confidence"},
+        {"id": "S10-instruction-delete-entry-transcript", "input": "so yeah um that entry in confidence about confidence attracting quality or whatever, actually scratch that, delete it", "expected": "delete_entry(confidence)", "before": "CORRECT: delete_entry confirm keyboard"}
       ],
-      "before_summary": "16/18 correct. Two reproduced reasoning failures, both in the reasoning-guidance layer this round targets: (1) rhetorical/reflective NOTE phrased as a question is answered conversationally and never saved (prompt's 'question -> no tool' bullet overrides its own 'information without a command -> note' bullet); (2) content-described read resolves by topic-title association instead of entry-content previews. No instruction-as-note misfire reproduced in this run — the evidence shows the CURRENT model+prompt handles clear indirect instructions, so fix-02 hardens the ACTUAL demonstrated weak boundaries (note-vs-question, content-vs-title targeting, and the general messy-phrasing rule) rather than adding a special case for one phrasing.",
-      "after_results": [],
-      "notes": "Harnesses are reusable for fix-03 after-runs: same inputs, same mechanism. Run with: node --import ./worker/test/ttf-loader.mjs worker/test/dispatch-before-after.mjs --seed (env: CF_ACCOUNT_ID, CF_API_TOKEN, GITHUB_REPO_TOKEN)."
+      "after_results": [
+        {"id": "T1", "after": "CORRECT (unchanged): delete_topic confirm keyboard"},
+        {"id": "T2", "after": "CORRECT (unchanged): read page of life-revelations"},
+        {"id": "T3", "after": "CORRECT (unchanged): entry updated to March"},
+        {"id": "T4", "after": "DISPATCH CORRECT (unchanged): export_pdf fired; same sandbox-only font artifact"},
+        {"id": "T5", "after": "CORRECT (unchanged): filed under appointments"},
+        {"id": "T6", "after": "CORRECT (unchanged): filed under life-revelations"},
+        {"id": "T7", "after": "CORRECT (unchanged): delete_entry confirm keyboard"},
+        {"id": "T8", "after": "CORRECT (unchanged): filed under airbnb"},
+        {"id": "S1", "after": "CORRECT (unchanged): filed under Confidence"},
+        {"id": "S2", "after": "FIXED: now file_note -> '✅ Filed note as entry 20260906-090429-yurw under Confidence' (was conversational reply, never saved)"},
+        {"id": "S3", "after": "CORRECT (unchanged): filed under Confidence"},
+        {"id": "S4", "after": "CORRECT (unchanged): filed under Confidence"},
+        {"id": "S5", "after": "CORRECT (unchanged): read page of confidence"},
+        {"id": "S6", "after": "CORRECT (unchanged): delete confirm keyboard"},
+        {"id": "S7", "after": "CORRECT (unchanged): entry updated"},
+        {"id": "S8", "after": "FIXED: read_topic now resolves to life-revelations and shows the actual nonchalant entry (was wrong topic 'confidence')"},
+        {"id": "S9", "after": "CORRECT (unchanged): filed under Confidence"},
+        {"id": "S10", "after": "CORRECT (unchanged): delete_entry confirm keyboard"}
+      ],
+      "comparison_summary": "18/18 after vs 16/18 before. Both reproduced reasoning failures fixed with zero regressions. The improvement is on exactly the boundaries this round targeted: note-vs-question (S2) and content-vs-title targeting (S8).",
+      "notes": "Reusable harnesses: node --import ./worker/test/ttf-loader.mjs worker/test/dispatch-before-after.mjs --seed (and dispatch-stress.mjs --seed). Env: CF_ACCOUNT_ID, CF_API_TOKEN, GITHUB_REPO_TOKEN."
     },
     {
       "id": "fix-02",
-      "status": "in_progress",
+      "status": "done",
       "name": "Rewrite dispatchSystemPrompt with Compass-quality reasoning guidance",
       "files": ["worker/src/gemini.js"],
-      "commits": [],
-      "plan": "Expand dispatchSystemPrompt(tree): keep role line, live tree injection, and the 4 path-targeting bullets; add (1) explicit named NOTE vs INSTRUCTION disambiguation rule with contrasting worked examples on each side INCLUDING borderline phrasings (rhetorical questions, imperative-shaped notes, hedged instructions); (2) explicit rule that grammatical mood/question-mark is a WEAK signal — decide by what the user would want to HAPPEN, and specifically that a musing/rhetorical question about the user's own life is a NOTE (file it), only a question asking the BOT for an answer/opinion is conversational; (3) messy-phrasing rule (filler words, false starts, run-ons, missing punctuation do NOT by themselves make something a note); (4) content-described read rule: match entry PREVIEWS not just topic titles; (5) USE THE TOOL reinforcement; (6) tighten file_note's description so it is not the ambiguity catch-all.",
-      "notes": ""
+      "commits": ["cd77b58"],
+      "change_detail": "dispatchSystemPrompt(tree) expanded from 3 classification bullets + 4 path bullets to a Compass-standard prompt: (1) named NOTE vs INSTRUCTION vs MESSAGE-TO-YOU three-way rule decided by 'what the user would want to HAPPEN, never by grammar alone'; (2) explicit 'grammatical mood is a WEAK signal' rule with both directions (questions can be notes, imperatives can be notes, declaratives can be instructions); (3) 9 worked examples of borderline phrasings on both sides; (4) explicit messy-transcript rule (filler words/false starts/run-ons never by themselves push toward file_note); (5) entry-preview content-targeting rule for content-described reads; (6) USE-THE-TOOL reinforcement. file_note's tool description tightened: 'Use ONLY for content the user wants kept... This is NOT a fallback for unclear messages.' Live tree injection and the 4 original deepest-node path-targeting bullets kept verbatim.",
+      "tested": "83/83 regression tests pass (silent-nonresponse 23, false-key-exhaustion 32, user-lock 28). Deploy verified via Cloudflare deployments API (08:59:00Z, 08:59:17Z) + worker GET / -> 200.",
+      "concerns": "None blocking. T4 export_pdf renders correctly in production (real bundled .ttf fonts); the sandbox font stub only affects harness-side PDF rendering, not the dispatch decision. The pre-existing corrupted doubled-paste key (len 106) and the saturated gemini-flash-lite-latest alias remain operator-facing runtime notes from the prior round — unchanged, out of this round's scope."
     },
     {
       "id": "fix-03",
-      "status": "pending",
+      "status": "done",
       "name": "Re-validate against the exact fix-01 test set and confirm measurable improvement",
       "files": ["worker/test/dispatch-before-after.mjs", "worker/test/dispatch-stress.mjs", "FIX_STATE.json"],
-      "commits": [],
-      "plan": "After fix-02 deploys (GitHub Actions -> Cloudflare Workers Builds on push to main), re-run BOTH harnesses with identical inputs, record literal after-results beside before-results. Pass = S2 and S8 fixed AND zero regressions across the other 16 inputs. Iterate on the prompt if anything still fails. Then verify manual commands/buttons/PDF export untouched (only prompt text + one tool description changed), mark fixes_complete with the full comparison recorded.",
+      "commits": ["cd77b58", "this push"],
+      "result": "18/18 after vs 16/18 before. S2 and S8 fixed; all 16 previously-correct inputs unchanged. Manual commands, button taps, and PDF export untouched (only dispatchSystemPrompt content and file_note's description changed; doExport/callbacks/router code not modified). VERIFY passed with genuine comparative before/after evidence recorded above.",
       "notes": ""
     }
   ]
