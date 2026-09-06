@@ -20,3 +20,10 @@ _2026-09-06 · 08:53 UTC_
 Never text first twice in a row
 
 ---
+
+<!-- e:20260906-085354-8k35 -->
+_2026-09-06 · 08:53 UTC_
+
+stop checking your phone first thing in the morning, seriously
+
+---
