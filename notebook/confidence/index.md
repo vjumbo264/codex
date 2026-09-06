@@ -1,12 +1,5 @@
 # Confidence
 
-<!-- e:20260906-090429-yurw -->
-_2026-09-06 · 09:04 UTC_
-
-why do I always say yes to things I don't even want to do
-
----
-
 <!-- e:20260906-090440-225l -->
 _2026-09-06 · 09:04 UTC_
 
