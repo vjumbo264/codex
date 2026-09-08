@@ -28,6 +28,8 @@ Most of my best ideas show up when I'm walking, not at my desk
 <!-- e:20260908-025702-1a0y -->
 _2026-09-08 · 02:57 UTC_
 
-Sometimes you just need to learn how to trust God. If there is an easier way, then follow it. Don't waste all your entire life stressing yourself. Don't force yourself to figure everything out or you'll forget to live. So live, live how you want to live. Trust God to help you. That is why the Holy Spirit is there. Depend on him. Don't focus on how other people who didn't have the Holy Spirit figured it out. Figure it out for yourself. Allow the Holy Spirit to show you. Don't feel guilty because you have the Holy Spirit. Don't feel guilty because other people didn't maximize the advantages they have through Jesus. Allow yourself to depend on God.
+Sometimes you just need to learn how to trust God. If there is an easier way, take it, and don't waste your entire life stressing. Don't force yourself to figure everything out, or you'll forget to actually live. So live—live how you want to live—and trust God to help you. That is why the Holy Spirit is there; depend on Him. 
+
+Don't focus on how others who didn't have the Holy Spirit figured things out. Figure it out for yourself and allow the Holy Spirit to guide you. Don't feel guilty because you have the Holy Spirit, and don't feel guilty just because others didn't maximize the advantages they have through Jesus. Allow yourself to fully depend on God.
 
 ---
